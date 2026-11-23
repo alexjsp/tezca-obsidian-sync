@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
 # Build and (re)start the Tezca server on Unraid. Env overrides: DEPLOY_HOST, DEPLOY_PATH,
-# TEZCA_DATA, TEZCA_PORT, TEZCA_PUBLIC_URL (forwarded to compose).
+# TEZCA_DATA, TEZCA_PORT, TEZCA_PUBLIC_URL, read from .env (see .env.example).
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-DEPLOY_HOST="${DEPLOY_HOST:-root@unraid.jsp.scot}"
+# Host-specific settings live in .env (gitignored); see .env.example.
+if [[ -f "${ROOT_DIR}/.env" ]]; then set -a; source "${ROOT_DIR}/.env"; set +a; fi
+
+DEPLOY_HOST="${DEPLOY_HOST:?set DEPLOY_HOST in .env (see .env.example)}"
 DEPLOY_PATH="${DEPLOY_PATH:-/mnt/user/appdata/tezca_source}"
 TEZCA_DATA="${TEZCA_DATA:-/mnt/user/appdata/tezca}"
 TEZCA_PORT="${TEZCA_PORT:-8089}"
-TEZCA_PUBLIC_URL="${TEZCA_PUBLIC_URL:-https://tezca.jsp.scot}"
+TEZCA_PUBLIC_URL="${TEZCA_PUBLIC_URL:?set TEZCA_PUBLIC_URL in .env (see .env.example)}"
 COMPOSE_FILE="deploy/compose.unraid.yml"
 PROJECT="tezca"
 RSYNC_RSH="${RSYNC_RSH:-ssh}"

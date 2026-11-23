@@ -51,6 +51,10 @@ pnpm sim -- --runs 5 --steps 200 --clients 4   # randomized multi-client simulat
 
 ## Installing the plugin on other devices
 
-Releases are published to GitHub with `just release <version>`. Install them with [BRAT](https://github.com/TfTHacker/obsidian42-brat): add the beta plugin `alexjsp/tezca-obsidian-sync` (the repo is private, so give BRAT a GitHub token with read access). Then pair the device from **Settings → Tezca Sync → Pair another device** on one that's already set up.
+Releases are published to GitHub with `just release <version>`. Install them with [BRAT](https://github.com/TfTHacker/obsidian42-brat): add the beta plugin `alexjsp/tezca-obsidian-sync` (no token needed). Then pair the device from **Settings → Tezca Sync → Pair another device** on one that's already set up.
 
-The server is deployed to Unraid with `just deploy-unraid`.
+The server is deployed to Unraid with `just deploy-unraid` (copy `.env.example` to `.env` first).
+
+## License
+
+[MIT](LICENSE)

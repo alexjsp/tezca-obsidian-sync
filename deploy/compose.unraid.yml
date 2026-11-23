@@ -10,7 +10,7 @@ services:
     ports:
       - "${TEZCA_PORT:-8089}:8080"
     environment:
-      TEZCA_PUBLIC_URL: ${TEZCA_PUBLIC_URL:-https://tezca.jsp.scot}
+      TEZCA_PUBLIC_URL: ${TEZCA_PUBLIC_URL:?set TEZCA_PUBLIC_URL}
       TEZCA_SERVER_NAME: ${TEZCA_SERVER_NAME:-Tezca}
     volumes:
       - ${TEZCA_DATA:-/mnt/user/appdata/tezca}:/data
