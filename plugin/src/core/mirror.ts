@@ -96,6 +96,8 @@ export class DiskMirror {
 	private stateTimer: ReturnType<typeof setTimeout> | null = null;
 	private indexTimer: ReturnType<typeof setTimeout> | null = null;
 	private stopped = false;
+	/** Vault events seen before the startup reconcile finished. */
+	private early: VaultEvent[] = [];
 	// Blob transfers run outside the serial queue; verifyBlob picks up their results.
 	private downloaded = new Map<string, Uint8Array>(); // blob id → plaintext ready to write
 	private downloadedBytes = 0;
@@ -174,6 +176,9 @@ export class DiskMirror {
 	async initialReconcile(): Promise<void> {
 		await this.enqueue(() => this.reconcileAll());
 		this.ready = true;
+		const early = this.early;
+		this.early = [];
+		for (const ev of early) this.onVaultEvent(ev);
 		for (const d of this.space.staleDocs()) if (d !== INDEX_DOC) this.fetchRemote(d);
 		const first = this.touched.values().next();
 		if (!first.done) this.touch(first.value);
@@ -540,7 +545,9 @@ export class DiskMirror {
 				return;
 			}
 		}
-		const doc = stale ? await this.space.acquireSynced(e.id) : await this.space.acquire(e.id);
+		// Without a baseline we're about to compare disk with the CRDT to decide who wins: make sure
+		// the CRDT isn't just "not downloaded yet" (that once overwrote a note with empty text).
+		const doc = stale || !base ? await this.space.acquireSynced(e.id) : await this.space.acquire(e.id);
 		try {
 			const ytext = textOf(doc);
 			const C = ytext.toString();
@@ -572,6 +579,7 @@ export class DiskMirror {
 			if (!base) {
 				// No shared history: CRDT keeps the path, disk version is preserved.
 				if (this.brakeEngaged) return;
+				if (!doc.isSynced) return this.scheduleRetry(e.id); // decide once the synced text is here
 				await this.writeConflictCopy(vp, D, "Local file differed from synced version");
 				await this.selfWrite(vp, C, D);
 				await this.setBaseline(e.id, e.path, C);
@@ -641,7 +649,13 @@ export class DiskMirror {
 	}
 
 	private onVaultEvent(ev: VaultEvent) {
-		if (!this.ready || this.stopped) return;
+		if (this.stopped) return;
+		if (!this.ready) {
+			// Startup reconcile still running: keep the event (e.g. the user typing during startup)
+			// and replay it once the reconcile is done, rather than losing it.
+			if (this.early.length < 10_000) this.early.push(ev);
+			return;
+		}
 		const relevant =
 			this.inScope(ev.path, ev.kind) || (ev.type === "rename" && this.inScope(ev.oldPath, ev.kind));
 		if (!relevant) {
@@ -1090,7 +1104,7 @@ export class DiskMirror {
 		if (this.isBound(vp)) return;
 		const base = await this.locate(e);
 		if (base === false) return;
-		const doc = await this.space.acquire(id);
+		const doc = base ? await this.space.acquire(id) : await this.space.acquireSynced(id);
 		try {
 			const ytext = textOf(doc);
 			const C = ytext.toString();
@@ -1112,6 +1126,7 @@ export class DiskMirror {
 				return;
 			}
 			if (!base) {
+				if (!doc.isSynced) return this.scheduleRetry(id); // decide once the synced text is here
 				await this.writeConflictCopy(vp, D, "A different local file existed at this path");
 				await this.selfWrite(vp, C, D);
 				await this.setBaseline(id, e.path, C);

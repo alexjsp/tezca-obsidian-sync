@@ -311,7 +311,7 @@ export class SyncEngine {
 				// First time on this device: never reconcile against an empty local index, or the
 				// files already on disk would be imported as duplicates of the share's entries.
 				await waitOnline(this.conn, 24 * 3600_000);
-				await space.index.whenSynced();
+				await this.waitForServerState(space, 120_000);
 			} else await this.waitForServerState(space, this.opts.startupWaitMs ?? 8000);
 			if (this.stopped || this.mounts?.get(m.spaceId)?.path !== m.path) {
 				await mirror.stop();

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { compaction } from "../src/core/doc-sync";
+import { SyncEngine } from "../src/core/engine";
 import { MemoryStore } from "../src/core/store";
 import { MemoryVault } from "../src/core/vault";
 import { converged, eventually, setupHost, snapshotVault, startClient, type Client } from "./helpers";
@@ -208,6 +209,27 @@ describe("sync engine (mock host)", () => {
 		b.engine.conn.reconnectNow();
 		await converged(a2, b);
 		expect(b.vault.files.get("offline.md")).toBe("made offline");
+	});
+
+	it("keeps edits made while the startup reconcile is still running", async () => {
+		const seed: Record<string, string> = {};
+		for (let i = 0; i < 40; i++) seed[`n${String(i).padStart(2, "0")}.md`] = `note ${i}\n`;
+		const { host, id, spaceId, a } = await pair({ a: seed });
+		await converged(a);
+		host.latency = 15; // a slow host keeps the new device's startup reconcile busy
+		const vault = new MemoryVault();
+		const engine = new SyncEngine({ host: "http://mock", identity: id, deviceId: "C", deviceName: "C", spaceId, store: new MemoryStore(), vault, clientVersion: "test", WebSocketImpl: host.WebSocket, http: host.http, startupWaitMs: 3000 });
+		const starting = engine.start();
+		// As soon as the reconcile has written the first note (and isn't done), the user edits it.
+		await eventually(() => vault.files.has("n00.md"), 10_000, "first note written");
+		expect(engine.mirror!.isReady).toBe(false);
+		await vault.userWrite("n00.md", "note 0\ntyped during startup\n");
+		await starting;
+		const c = { name: "C", vault, store: new MemoryStore(), engine };
+		clients.push(c);
+		host.latency = 0;
+		await converged(a, c);
+		expect(a.vault.files.get("n00.md")).toBe("note 0\ntyped during startup\n");
 	});
 
 	it("ignores hidden folders", async () => {

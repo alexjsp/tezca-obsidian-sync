@@ -53,8 +53,9 @@ describe("shared folders (real server)", () => {
 		const spaceId = await a1.engine.shareFolder("Family", "Family");
 		await eventually(() => a1.engine.shares.has(spaceId) && a2.engine.shares.has(spaceId), 10_000, "both of Alex's devices mount the share");
 		await idle(a1, a2);
-		// Converting didn't delete anything on the owner's other device.
+		// Converting didn't delete or clobber anything on the owner's other device.
 		expect(text(a2, "Family/plan.md")).toBe("# Plan\n");
+		expect([...a2.vault.files.keys()].filter((p) => p.includes("(conflict"))).toEqual([]);
 
 		const s1 = await device(sam, "s-laptop");
 		await join(a1, s1, spaceId, "editor", "Shared/Family");
