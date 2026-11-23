@@ -264,3 +264,23 @@ devices; and a first mount compared disk against a share doc that hadn't downloa
 
 Not done in M4: guest management for admins (listing/removing guests); moving a hostless guest onto a host
 of their own later (they'd re-join their shares from the new host).
+
+### M5: live Canvas and settings sync (built 2026-11-24)
+- **Live Canvas:** new `.canvas` files are doc-backed entries (`kind: "canvas"`). A Y.Doc holds nodes and edges
+  as maps of fields (card text as `Y.Text`) plus their order; the file is written in Obsidian's own format.
+  A local save applies only what changed since the last synced version, so concurrent changes from other
+  devices survive; text cards merge three-way. Invalid (half-written) canvas files aren't imported until they
+  parse. The mirror now goes through a per-kind content model (Markdown: text diff + three-way merge).
+  Canvases already synced as attachments (from 0.2.x) stay attachments.
+- **Settings sync:** per device, opt in to core settings, appearance (themes, snippets), hotkeys, community
+  plugin list + settings, and plugin code. Config files sync as attachments in the private space only;
+  workspace layout and Tezca's own folder never sync. The Obsidian adapter reaches `.obsidian` through the
+  raw adapter and watches it with raw events plus a 30 s scan; changes from other devices prompt a reload.
+- **Simulator:** canvas create / add card / move card with a lost-card check.
+
+Found by the simulator during M4/M5: a verify that ran before a queued local delete or move found the file
+missing and wrote it back, leaving it untracked once the delete was handled (existed since M1); now
+skipped for paths with a pending delete/move.
+
+Not done in M5: a canvas open in Obsidian picks up remote changes when Obsidian reloads the file from disk
+(no live canvas editor binding like Markdown's); converting existing attachment-kind canvases to live ones.
