@@ -287,5 +287,10 @@ reconcile) was read as "deleted while closed" plus a new file, detaching the not
 concurrent edits (existed since M1; events made before the reconcile are now applied first); and an edit
 that raced a remote rename is now kept as "name (edited on <device>)" instead of at the old path.
 
+Renames made while sync wasn't running (in a file manager while Obsidian was closed, or whose event arrived
+as the plugin stopped) used to become a delete plus a new file. The startup reconcile now recognises them:
+a tracked file missing from its path plus an untracked file that is clearly the same one (identical bytes
+for attachments; for notes, most of the last-synced text still present and a unique best match).
+
 Not done in M5: a canvas open in Obsidian picks up remote changes when Obsidian reloads the file from disk
 (no live canvas editor binding like Markdown's); converting existing attachment-kind canvases to live ones.
