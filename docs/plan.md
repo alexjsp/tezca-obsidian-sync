@@ -243,3 +243,24 @@ Not done in M3:
   removing; a signed membership log is future work.
 - Invites need an existing host account; cross-host shares and guests are M4.
 - "Require approval" for invites.
+
+Found by the simulator after M3 was first committed: the root space's tombstone for a converted folder let its
+dead-folder cleanup delete the (momentarily empty) mount folder, which unmounted the share on all the owner's
+devices; and a first mount compared disk against a share doc that hadn't downloaded yet (fixed: sync first).
+
+### M4: cross-host shares and guests (built 2026-11-24)
+- **Guests:** redeeming a share invite on a host where you have no account makes you a GUEST there (the
+  redeem is body-signed; the account is created inside the redeem transaction only when the invite is
+  valid). Guests can only create one PROFILE space; `TEZCA_GUEST_QUOTA_MB` caps their attachment uploads.
+- **Multiple hosts:** the engine keeps one link (connection, API, blob client, limits) per host. A mount
+  records the host of a share that lives elsewhere, so all of a user's devices connect to it. Joining
+  redeems before connecting (a connection opened first would be refused and not retried).
+- **Hostless users:** someone without Tezca set up who opens an invite joins that host as a guest; a
+  profile space there holds their mount table and nothing else (their own notes never sync). Pairing goes
+  through that host.
+- **Tests:** two-server tests for a user with their own host joining a share on another host (both of
+  their devices mount it, private files stay on their host) and for a hostless guest joining, editing and
+  pairing a second device. Server e2e tests cover guest redeem errors, profile limits, quota and roles.
+
+Not done in M4: guest management for admins (listing/removing guests); moving a hostless guest onto a host
+of their own later (they'd re-join their shares from the new host).
