@@ -107,3 +107,15 @@ func (c ctxReader) Read(p []byte) (int, error) {
 	}
 	return c.r.Read(p)
 }
+
+// Delete removes the blob's file.
+func (f *FS) Delete(_ context.Context, spaceID, blobID string) error {
+	if !validKey(spaceID, blobID) {
+		return errBadKey
+	}
+	err := os.Remove(f.path(spaceID, blobID))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	return err
+}

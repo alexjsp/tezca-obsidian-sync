@@ -29,6 +29,7 @@ var (
 	ErrForbidden  = errors.New("forbidden")
 	ErrLastOwner  = errors.New("last owner")
 	ErrBadKeys    = errors.New("keys do not match")
+	ErrQuota      = errors.New("quota exceeded")
 )
 
 // Host roles (match pb.HostRole).
@@ -36,6 +37,13 @@ const (
 	HostAdmin  = 1
 	HostMember = 2
 	HostGuest  = 3
+)
+
+// Space kinds (match pb.SpaceKind).
+const (
+	KindRoot    = 1
+	KindShare   = 2
+	KindProfile = 3
 )
 
 // Space roles (match pb.SpaceRole).
@@ -135,6 +143,10 @@ CREATE TABLE IF NOT EXISTS blobs(space_id TEXT NOT NULL, blob_id TEXT NOT NULL, 
 CREATE TABLE IF NOT EXISTS share_invites(token TEXT PRIMARY KEY, space_id TEXT NOT NULL, role INT NOT NULL, created_by BLOB NOT NULL, created_at INT NOT NULL, expires_at INT NOT NULL, revoked INT NOT NULL DEFAULT 0, redeemed_by BLOB, redeemed_at INT);
 CREATE INDEX IF NOT EXISTS share_invites_by_space ON share_invites(space_id);
 CREATE TABLE IF NOT EXISTS share_invite_keys(token TEXT NOT NULL, epoch INT NOT NULL, wrapped BLOB NOT NULL, PRIMARY KEY(token, epoch));
+`,
+	// v4 (M4): guest blob quotas sum blobs by uploader.
+	`
+CREATE INDEX IF NOT EXISTS blobs_by_creator ON blobs(created_by);
 `,
 }
 

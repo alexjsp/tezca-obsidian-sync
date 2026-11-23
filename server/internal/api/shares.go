@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"tezca/server/internal/sigs"
 	"tezca/server/internal/store"
 )
 
@@ -228,22 +229,48 @@ func (a *API) revokeShareInvite(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// redeemShareInvite: POST /api/share-invites/redeem. A host user signs the request (HTTP sig,
+// body {token}); anyone else signs the body like /api/redeem ({token, sign_pk, box_pk, sig})
+// and becomes a GUEST if the redeem succeeds (M4). Registered users may use either form.
 func (a *API) redeemShareInvite(w http.ResponseWriter, r *http.Request) {
 	err := func() error {
-		u, body, err := a.authenticate(r)
-		if err != nil {
-			return err
-		}
-		var q struct {
-			Token string `json:"token"`
-		}
-		if err := decode(body, &q); err != nil {
-			return err
+		var (
+			q          redeemReq
+			signPk     []byte
+			guestBoxPk []byte
+		)
+		if r.Header.Get("Authorization") != "" {
+			u, body, err := a.authenticate(r)
+			if err != nil {
+				return err
+			}
+			if err := decode(body, &q); err != nil {
+				return err
+			}
+			signPk = u.SignPk
+		} else {
+			body, err := readBody(r)
+			if err != nil {
+				return err
+			}
+			if err := decode(body, &q); err != nil {
+				return err
+			}
+			if q.SignPk == nil {
+				return herr(http.StatusUnauthorized, "missing Tezca authorization")
+			}
+			if err := q.check(q.Token); err != nil {
+				return err
+			}
+			if !sigs.Verify(q.SignPk, sigs.Redeem(a.cfg.ServerID, q.Token, q.SignPk, q.BoxPk), q.Sig) {
+				return herr(http.StatusUnauthorized, "bad signature")
+			}
+			signPk, guestBoxPk = q.SignPk, q.BoxPk
 		}
 		if q.Token == "" {
 			return herr(http.StatusBadRequest, "token required")
 		}
-		res, joined, err := a.cfg.Store.RedeemShareInvite(r.Context(), q.Token, u.SignPk, a.cfg.Now().Unix())
+		res, joined, err := a.cfg.Store.RedeemShareInvite(r.Context(), q.Token, signPk, guestBoxPk, a.cfg.Now().Unix())
 		switch {
 		case errors.Is(err, store.ErrNotFound):
 			return herr(http.StatusNotFound, "invite not found")

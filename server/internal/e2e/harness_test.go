@@ -93,6 +93,12 @@ func (c *offsetClock) Offset() time.Duration {
 
 func newEnv(t *testing.T, mod func(*ws.Config)) *env {
 	t.Helper()
+	return newEnvAPI(t, mod, nil)
+}
+
+// newEnvAPI is newEnv with a hook for the HTTP API's config as well.
+func newEnvAPI(t *testing.T, mod func(*ws.Config), apiMod func(*api.Config)) *env {
+	t.Helper()
 	dir := t.TempDir()
 	st, err := store.Open(dir)
 	if err != nil {
@@ -115,8 +121,12 @@ func newEnv(t *testing.T, mod func(*ws.Config)) *env {
 	}
 	hub := ws.NewHub(cfg)
 	apiClock := &offsetClock{}
-	h := api.New(api.Config{Store: st, Hub: hub, Notify: hub, ServerID: id, Name: "Test", Logger: log, Now: apiClock.Now,
-		Blobs: bs, MaxBlobBytes: testMaxBlob})
+	acfg := api.Config{Store: st, Hub: hub, Notify: hub, ServerID: id, Name: "Test", Logger: log, Now: apiClock.Now,
+		Blobs: bs, MaxBlobBytes: testMaxBlob}
+	if apiMod != nil {
+		apiMod(&acfg)
+	}
+	h := api.New(acfg)
 	srv := httptest.NewServer(h)
 	t.Cleanup(func() {
 		hub.Close()

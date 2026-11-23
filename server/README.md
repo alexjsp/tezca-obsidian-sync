@@ -40,6 +40,7 @@ For Docker, see [`deploy/README.md`](../deploy/README.md).
 | `TEZCA_CLAIM_CODE` | (random) | Presets the claim code while the server is unclaimed. |
 | `TEZCA_DEBUG` | (unset) | Any value enables debug logging. |
 | `TEZCA_MAX_BLOB_MB` | `100` | Largest attachment (plaintext MiB). Uploads over this + 40 bytes of encryption overhead get 413. Shown to clients as `max_blob_bytes` in `/api/info`. |
+| `TEZCA_GUEST_QUOTA_MB` | `1024` | Storage cap per guest (a user who joined through a share invite and has no host account): the total size of attachments they upload to this server, in MiB. Uploads over it get 507. `0` = unlimited. |
 | `TEZCA_HISTORY_HOURS` | `24` | Version history: keep the newest snapshot per clock hour for this many hours. |
 | `TEZCA_HISTORY_DAYS` | `30` | Version history: keep the newest snapshot per UTC day for this many days. The latest snapshot is always kept. |
 

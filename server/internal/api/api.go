@@ -28,7 +28,8 @@ const (
 	MaxBody         = 256 << 10 // JSON request bodies; blob bodies have their own limit
 	BlobOverhead    = 40        // nonce(24) + Poly1305 tag(16)
 	DefaultMaxBlob  = 100 << 20
-	MaxSkew         = 300 // seconds
+	DefaultGuestMB  = 1024 // TEZCA_GUEST_QUOTA_MB
+	MaxSkew         = 300  // seconds
 	PairingTTL      = 15 * time.Minute
 	DefaultInvite   = 7 * 24 * time.Hour
 	MaxInvite       = 30 * 24 * time.Hour
@@ -48,6 +49,8 @@ type Config struct {
 
 	Blobs        blobs.BlobStore // blob bytes; blob routes are disabled if nil
 	MaxBlobBytes int64           // max plaintext blob size (default DefaultMaxBlob)
+	// GuestQuotaBytes caps the total size of blobs each guest uploads (0 = unlimited).
+	GuestQuotaBytes int64
 
 	Notify Notifier // live sessions (the ws Hub); optional
 }
@@ -324,13 +327,21 @@ func (a *API) info(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	out := map[string]any{
 		"server_id":        a.cfg.ServerID,
 		"protocol_version": ProtocolVersion,
 		"claimed":          claimed,
 		"name":             a.cfg.Name,
 		"max_blob_bytes":   a.cfg.MaxBlobBytes,
-	})
+	}
+	// A valid signature of a host user adds their role (M4). A missing or failing signature is
+	// not an error here: the request is answered as if unsigned.
+	if r.Header.Get("Authorization") != "" {
+		if u, _, err := a.authenticate(r); err == nil {
+			out["role"] = roleName(u.Role)
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 type redeemReq struct {

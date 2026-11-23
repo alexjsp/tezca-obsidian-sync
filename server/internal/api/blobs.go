@@ -87,10 +87,32 @@ func (b *signedBody) Read(p []byte) (int, error) {
 	return n, err
 }
 
+var (
+	errQuota     = errors.New("guest storage quota exceeded")
+	errQuotaHTTP = herr(http.StatusInsufficientStorage, "guest storage quota exceeded")
+)
+
+// quotaReader fails with errQuota once more than left bytes have been read.
+type quotaReader struct {
+	r    io.Reader
+	left int64
+}
+
+func (q *quotaReader) Read(p []byte) (int, error) {
+	n, err := q.r.Read(p)
+	q.left -= int64(n)
+	if q.left < 0 {
+		return n, errQuota
+	}
+	return n, err
+}
+
 // bodyErr maps a signedBody read failure to an HTTP error.
 func bodyErr(err error) error {
 	var mbe *http.MaxBytesError
 	switch {
+	case errors.Is(err, errQuota):
+		return errQuotaHTTP
 	case errors.Is(err, errBadBodySig):
 		return herr(http.StatusUnauthorized, "bad signature")
 	case errors.As(err, &mbe):
@@ -135,6 +157,7 @@ func (a *API) putBlob(w http.ResponseWriter, r *http.Request) {
 
 		ctx := r.Context()
 		existing, err := a.cfg.Store.GetBlob(ctx, space, id)
+		isNew := errors.Is(err, store.ErrNotFound)
 		switch {
 		case err == nil:
 			// Already stored: authenticate the body, discard it. (If the bytes went missing
@@ -150,8 +173,24 @@ func (a *API) putBlob(w http.ResponseWriter, r *http.Request) {
 				writeJSON(w, http.StatusOK, map[string]any{"size": existing.Size})
 				return nil
 			}
-		case !errors.Is(err, store.ErrNotFound):
+		case !isNew:
 			return err
+		}
+
+		// Guest quota (M4): refuse up front what can't fit, stop the stream once it overflows,
+		// and re-check when recording (concurrent uploads), dropping the bytes if it's over.
+		var quota int64
+		if isNew && u.Role == store.HostGuest && a.cfg.GuestQuotaBytes > 0 {
+			quota = a.cfg.GuestQuotaBytes
+			used, err := a.cfg.Store.UserBlobBytes(ctx, u.SignPk)
+			if err != nil {
+				return err
+			}
+			left := quota - used
+			if left <= 0 || r.ContentLength > left {
+				return errQuotaHTTP
+			}
+			body.r = &quotaReader{r: body.r, left: left}
 		}
 
 		if err := a.cfg.Blobs.Put(ctx, space, id, body); err != nil {
@@ -163,7 +202,17 @@ func (a *API) putBlob(w http.ResponseWriter, r *http.Request) {
 		if !body.done { // a BlobStore must read to EOF; never record an unverified blob
 			return errors.New("blob store did not consume the body")
 		}
-		created, err := a.cfg.Store.PutBlob(ctx, space, id, store.Blob{Size: body.n, CreatedBy: u.SignPk, CreatedAt: a.cfg.Now().UnixMilli()})
+		created, err := a.cfg.Store.PutBlob(ctx, space, id, store.Blob{Size: body.n, CreatedBy: u.SignPk, CreatedAt: a.cfg.Now().UnixMilli()}, quota)
+		if errors.Is(err, store.ErrQuota) {
+			// Only remove the bytes if nobody recorded this blob meanwhile (a concurrent upload of
+			// the same content by another user): deleting them would break that user's copy.
+			if _, gerr := a.cfg.Store.GetBlob(ctx, space, id); errors.Is(gerr, store.ErrNotFound) {
+				if err := a.cfg.Blobs.Delete(ctx, space, id); err != nil {
+					a.log.Warn("delete over-quota blob", "space", space, "blob", id, "err", err)
+				}
+			}
+			return errQuotaHTTP
+		}
 		if err != nil {
 			return err
 		}

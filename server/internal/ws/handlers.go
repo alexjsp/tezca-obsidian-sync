@@ -145,14 +145,15 @@ func validSpaceID(id string) bool {
 
 func (c *conn) createSpace(ctx context.Context, m *pb.CreateSpace) {
 	err := func() error {
-		if c.user.Role != store.HostAdmin && c.user.Role != store.HostMember {
-			return rerr(pb.ErrorCode_ERROR_CODE_FORBIDDEN, "guests cannot create spaces")
-		}
 		if !validSpaceID(m.SpaceId) {
 			return rerr(pb.ErrorCode_ERROR_CODE_BAD_REQUEST, "space_id must be 16 bytes base64url")
 		}
 		if _, ok := pb.SpaceKind_name[int32(m.Kind)]; !ok || m.Kind == pb.SpaceKind_SPACE_KIND_UNSPECIFIED {
 			return rerr(pb.ErrorCode_ERROR_CODE_BAD_REQUEST, "invalid kind")
+		}
+		// Guests (M4) may only create their one PROFILE space (the store refuses a second).
+		if c.user.Role != store.HostAdmin && c.user.Role != store.HostMember && m.Kind != pb.SpaceKind_SPACE_KIND_PROFILE {
+			return rerr(pb.ErrorCode_ERROR_CODE_FORBIDDEN, "guests can only create a profile space")
 		}
 		if len(m.WrappedKey) == 0 || len(m.WrappedKey) > MaxWrappedKey {
 			return rerr(pb.ErrorCode_ERROR_CODE_BAD_REQUEST, "invalid wrapped_key")

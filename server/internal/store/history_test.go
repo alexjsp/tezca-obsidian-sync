@@ -144,15 +144,53 @@ func TestBlobRows(t *testing.T) {
 	if _, err := s.GetBlob(ctx, sp, "b"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing: %v", err)
 	}
-	if created, err := s.PutBlob(ctx, sp, "b", Blob{Size: 10, CreatedBy: pk(1), CreatedAt: 5}); err != nil || !created {
+	if created, err := s.PutBlob(ctx, sp, "b", Blob{Size: 10, CreatedBy: pk(1), CreatedAt: 5}, 0); err != nil || !created {
 		t.Fatalf("put: %v %v", created, err)
 	}
-	if created, err := s.PutBlob(ctx, sp, "b", Blob{Size: 99, CreatedBy: pk(2), CreatedAt: 6}); err != nil || created {
+	if created, err := s.PutBlob(ctx, sp, "b", Blob{Size: 99, CreatedBy: pk(2), CreatedAt: 6}, 0); err != nil || created {
 		t.Fatalf("re-put: %v %v", created, err)
 	}
 	b, err := s.GetBlob(ctx, sp, "b")
 	if err != nil || b.Size != 10 || !bytes.Equal(b.CreatedBy, pk(1)) || b.CreatedAt != 5 {
 		t.Fatalf("get: %+v %v", b, err)
+	}
+
+	// Quota: a new row that takes its uploader over the cap isn't recorded; an existing one
+	// (dedup) never counts.
+	if created, err := s.PutBlob(ctx, sp, "c", Blob{Size: 15, CreatedBy: pk(1)}, 20); !errors.Is(err, ErrQuota) || created {
+		t.Fatalf("over quota: %v %v", created, err)
+	}
+	if _, err := s.GetBlob(ctx, sp, "c"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("over-quota row recorded: %v", err)
+	}
+	if created, err := s.PutBlob(ctx, sp, "b", Blob{Size: 50, CreatedBy: pk(1)}, 20); err != nil || created {
+		t.Fatalf("dedup under quota: %v %v", created, err)
+	}
+	if created, err := s.PutBlob(ctx, sp, "c", Blob{Size: 10, CreatedBy: pk(1)}, 20); err != nil || !created {
+		t.Fatalf("up to quota: %v %v", created, err)
+	}
+	if used, err := s.UserBlobBytes(ctx, pk(1)); err != nil || used != 20 {
+		t.Fatalf("usage: %d %v", used, err)
+	}
+	if used, err := s.UserBlobBytes(ctx, pk(3)); err != nil || used != 0 {
+		t.Fatalf("usage of nobody: %d %v", used, err)
+	}
+}
+
+func TestProfileSpaces(t *testing.T) {
+	ctx := context.Background()
+	s := open(t)
+	if err := s.CreateSpace(ctx, sp, KindProfile, pk(1), []byte("w"), nil, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateSpace(ctx, "BBBBBBBBBBBBBBBBBBBBBB", KindProfile, pk(1), []byte("w"), nil, 1); !errors.Is(err, ErrConflict) {
+		t.Fatalf("second profile: %v", err)
+	}
+	if err := s.CreateSpace(ctx, "BBBBBBBBBBBBBBBBBBBBBB", KindProfile, pk(2), []byte("w"), nil, 1); err != nil {
+		t.Fatalf("another user's profile: %v", err)
+	}
+	if err := s.CreateSpace(ctx, "CCCCCCCCCCCCCCCCCCCCCC", KindShare, pk(1), []byte("w"), nil, 1); err != nil {
+		t.Fatalf("share after profile: %v", err)
 	}
 }
 
@@ -191,7 +229,7 @@ func TestMigrateFromV1(t *testing.T) {
 	if d, err := s.GetDoc(ctx, sp, "d"); err != nil || d.SnapshotCreatedAt != 1234 {
 		t.Fatalf("doc: %+v %v", d, err)
 	}
-	if _, err := s.PutBlob(ctx, sp, "b", Blob{Size: 1, CreatedBy: pk(1), CreatedAt: 1}); err != nil {
+	if _, err := s.PutBlob(ctx, sp, "b", Blob{Size: 1, CreatedBy: pk(1), CreatedAt: 1}, 0); err != nil {
 		t.Fatalf("blobs table: %v", err)
 	}
 }

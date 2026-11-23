@@ -103,6 +103,23 @@ func conformance(t *testing.T, bs BlobStore) {
 		}
 	}
 
+	// Delete, and deleting a missing blob.
+	gone := strings.Repeat("d", 43)
+	if err := bs.Put(ctx, space, gone, bytes.NewReader(small)); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := bs.Delete(ctx, space, gone); err != nil {
+			t.Fatalf("delete: %v", err)
+		}
+		if ok, err := bs.Exists(ctx, space, gone); err != nil || ok {
+			t.Fatalf("exists after delete: %v %v", ok, err)
+		}
+	}
+	if got := get(blob); !bytes.Equal(got, big) {
+		t.Fatal("delete removed another blob")
+	}
+
 	// Path traversal is refused.
 	if err := bs.Put(ctx, "../x", blob, bytes.NewReader(small)); err == nil {
 		t.Fatal("traversal accepted")

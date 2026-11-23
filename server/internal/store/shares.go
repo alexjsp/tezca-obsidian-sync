@@ -162,8 +162,20 @@ func (s *Store) RevokeShareInvite(ctx context.Context, space string, owner []byt
 // the redeemer is still a member. Errors: ErrNotFound (unknown), ErrRedeemed (another key),
 // ErrExpired (expired, revoked, or the redeemer has since been removed). joined reports whether
 // this call changed the space's membership.
-func (s *Store) RedeemShareInvite(ctx context.Context, token string, signPk []byte, now int64) (out ShareRedemption, joined bool, err error) {
+//
+// With a non-nil guestBoxPk (M4), a caller who isn't a host user yet is registered as a GUEST
+// with that box key once the invite has been checked, in the same transaction; a failed redeem
+// creates no user. An existing user keeps their role and box key.
+func (s *Store) RedeemShareInvite(ctx context.Context, token string, signPk, guestBoxPk []byte, now int64) (out ShareRedemption, joined bool, err error) {
 	err = s.tx(ctx, func(tx *sql.Tx) error {
+		ensureUser := func() error {
+			if guestBoxPk == nil {
+				return nil
+			}
+			_, err := tx.Exec(`INSERT INTO users(sign_pk, box_pk, role, created_at) VALUES(?, ?, ?, ?)
+				ON CONFLICT(sign_pk) DO NOTHING`, signPk, guestBoxPk, HostGuest, now)
+			return err
+		}
 		var inv ShareInvite
 		var revoked bool
 		err := tx.QueryRow(`SELECT space_id, role, expires_at, revoked, redeemed_by FROM share_invites WHERE token = ?`, token).
@@ -206,6 +218,9 @@ func (s *Store) RedeemShareInvite(ctx context.Context, token string, signPk []by
 			if _, err := tx.Exec(`UPDATE share_invites SET redeemed_by = ?, redeemed_at = ? WHERE token = ?`, signPk, now, token); err != nil {
 				return err
 			}
+		}
+		if err := ensureUser(); err != nil {
+			return err
 		}
 		out = ShareRedemption{SpaceID: space, Role: role}
 		err = tx.QueryRow(`SELECT kind, epoch, meta, meta_epoch FROM spaces WHERE space_id = ?`, space).

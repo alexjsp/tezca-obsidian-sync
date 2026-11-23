@@ -23,6 +23,8 @@ type BlobStore interface {
 	// Get returns the blob's bytes and size, or ErrNotFound.
 	Get(ctx context.Context, spaceID, blobID string) (io.ReadCloser, int64, error)
 	Exists(ctx context.Context, spaceID, blobID string) (bool, error)
+	// Delete removes the blob. Deleting a missing blob is not an error.
+	Delete(ctx context.Context, spaceID, blobID string) error
 }
 
 // validKey guards against path traversal: ids must be non-empty base64url (≥ 2 chars for the

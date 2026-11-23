@@ -52,7 +52,7 @@ func TestMigrateFromV2(t *testing.T) {
 		}
 		var v int
 		s.r.QueryRow(`PRAGMA user_version`).Scan(&v)
-		if v != len(migrations) || v != 3 {
+		if v != len(migrations) || v != 4 {
 			t.Fatalf("user_version %d", v)
 		}
 		if got, err := s.GetSpace(ctx, sp, pk(1)); err != nil || got.Role != SpaceOwner || len(got.Keys) != 1 {
@@ -62,7 +62,7 @@ func TestMigrateFromV2(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		res, joined, err := s.RedeemShareInvite(ctx, tok, pk(2), 20)
+		res, joined, err := s.RedeemShareInvite(ctx, tok, pk(2), nil, 20)
 		if err != nil || !joined || res.Role != SpaceEditor || res.Kind != 2 || len(res.Keys) != 1 {
 			t.Fatalf("redeem: %+v %v %v", res, joined, err)
 		}
@@ -73,7 +73,7 @@ func TestMigrateFromV2(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, _, err := s.RedeemShareInvite(ctx, tok, pk(3), 20); !errors.Is(err, ErrRedeemed) {
+		if _, _, err := s.RedeemShareInvite(ctx, tok, pk(3), nil, 20); !errors.Is(err, ErrRedeemed) {
 			t.Fatalf("after reopen: %v", err)
 		}
 		s.Close()

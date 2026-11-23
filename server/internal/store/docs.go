@@ -32,7 +32,8 @@ type Space struct {
 	Members   []Member
 }
 
-// CreateSpace creates a space with owner as OWNER at epoch 0. Duplicate id → ErrConflict.
+// CreateSpace creates a space with owner as OWNER at epoch 0. Duplicate id, or a second
+// PROFILE space created by the same user → ErrConflict.
 func (s *Store) CreateSpace(ctx context.Context, spaceID string, kind int, owner, wrappedKey, meta []byte, now int64) error {
 	return s.tx(ctx, func(tx *sql.Tx) error {
 		var n int
@@ -41,6 +42,14 @@ func (s *Store) CreateSpace(ctx context.Context, spaceID string, kind int, owner
 		}
 		if n > 0 {
 			return ErrConflict
+		}
+		if kind == KindProfile {
+			if err := tx.QueryRow(`SELECT COUNT(*) FROM spaces WHERE kind = ? AND created_by = ?`, KindProfile, owner).Scan(&n); err != nil {
+				return err
+			}
+			if n > 0 {
+				return ErrConflict
+			}
 		}
 		if _, err := tx.Exec(`INSERT INTO spaces(space_id, kind, epoch, meta, meta_epoch, created_by, created_at) VALUES(?, ?, 0, ?, 0, ?, ?)`,
 			spaceID, kind, meta, owner, now); err != nil {

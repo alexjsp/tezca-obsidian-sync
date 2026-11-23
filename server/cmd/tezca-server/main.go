@@ -141,6 +141,10 @@ func run() error {
 	if maxBlobMB == 0 {
 		return fmt.Errorf("TEZCA_MAX_BLOB_MB must be at least 1")
 	}
+	guestQuotaMB, err := envInt("TEZCA_GUEST_QUOTA_MB", api.DefaultGuestMB)
+	if err != nil {
+		return err
+	}
 	var history store.History
 	if history.Hours, err = envInt("TEZCA_HISTORY_HOURS", store.DefaultHistory.Hours); err != nil {
 		return err
@@ -168,7 +172,7 @@ func run() error {
 	hub := ws.NewHub(ws.Config{Store: st, ServerID: serverID, Logger: log})
 	handler := api.New(api.Config{
 		Store: st, Hub: hub, Notify: hub, ServerID: serverID, PublicURL: publicURL, Name: name, Logger: log,
-		Blobs: blobStore, MaxBlobBytes: int64(maxBlobMB) << 20,
+		Blobs: blobStore, MaxBlobBytes: int64(maxBlobMB) << 20, GuestQuotaBytes: int64(guestQuotaMB) << 20,
 	})
 
 	ln, err := net.Listen("tcp", listen)

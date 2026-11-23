@@ -115,3 +115,11 @@ func notFound(err error) error {
 	}
 	return err
 }
+
+// Delete removes the object (S3 deletes of missing keys succeed).
+func (s *S3) Delete(ctx context.Context, spaceID, blobID string) error {
+	if !validKey(spaceID, blobID) {
+		return errBadKey
+	}
+	return s.c.RemoveObject(ctx, s.bucket, s.key(spaceID, blobID), minio.RemoveObjectOptions{})
+}

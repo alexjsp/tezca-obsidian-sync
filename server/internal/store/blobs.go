@@ -27,13 +27,41 @@ func (s *Store) GetBlob(ctx context.Context, spaceID, blobID string) (Blob, erro
 }
 
 // PutBlob records a stored blob. It reports false (and leaves the row alone) if the blob was
-// already recorded.
-func (s *Store) PutBlob(ctx context.Context, spaceID, blobID string, b Blob) (bool, error) {
-	res, err := s.w.ExecContext(ctx, `INSERT INTO blobs(space_id, blob_id, size, created_by, created_at) VALUES(?, ?, ?, ?, ?)
-		ON CONFLICT(space_id, blob_id) DO NOTHING`, spaceID, blobID, b.Size, b.CreatedBy, b.CreatedAt)
+// already recorded. With quota > 0, a new row that would take the total size of blobs created
+// by b.CreatedBy above quota is not recorded and ErrQuota is returned.
+func (s *Store) PutBlob(ctx context.Context, spaceID, blobID string, b Blob, quota int64) (created bool, err error) {
+	err = s.tx(ctx, func(tx *sql.Tx) error {
+		res, err := tx.Exec(`INSERT INTO blobs(space_id, blob_id, size, created_by, created_at) VALUES(?, ?, ?, ?, ?)
+			ON CONFLICT(space_id, blob_id) DO NOTHING`, spaceID, blobID, b.Size, b.CreatedBy, b.CreatedAt)
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		created = n > 0
+		if !created || quota <= 0 {
+			return nil
+		}
+		var used int64
+		if err := tx.QueryRow(`SELECT COALESCE(SUM(size), 0) FROM blobs WHERE created_by = ?`, b.CreatedBy).Scan(&used); err != nil {
+			return err
+		}
+		if used > quota {
+			return ErrQuota // rolls the insert back
+		}
+		return nil
+	})
 	if err != nil {
-		return false, err
+		created = false
 	}
-	n, err := res.RowsAffected()
-	return n > 0, err
+	return created, err
+}
+
+// UserBlobBytes returns the total size of the blobs signPk uploaded on this host.
+func (s *Store) UserBlobBytes(ctx context.Context, signPk []byte) (int64, error) {
+	var n int64
+	err := s.r.QueryRowContext(ctx, `SELECT COALESCE(SUM(size), 0) FROM blobs WHERE created_by = ?`, signPk).Scan(&n)
+	return n, err
 }
