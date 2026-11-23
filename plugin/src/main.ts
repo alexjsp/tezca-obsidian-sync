@@ -1,4 +1,4 @@
-import { Notice, Platform, Plugin, addIcon, requestUrl, MarkdownView, type ObsidianProtocolData } from "obsidian";
+import { Notice, Platform, Plugin, addIcon, requestUrl, MarkdownView, TFile, type ObsidianProtocolData } from "obsidian";
 import type { EditorView } from "@codemirror/view";
 import { HostConnection } from "./core/connection";
 import {
@@ -19,6 +19,7 @@ import { SpaceSync } from "./core/space";
 import { IdbStore } from "./core/store";
 import { log } from "./core/util";
 import { SpaceKind } from "./proto/tezca/v1/sync_pb";
+import { DeletedFilesModal, HistoryModal } from "./obsidian/history-modal";
 import { EditorBindings } from "./obsidian/editor";
 import { LinkModal, RecoveryPhraseModal, choose, confirm, form } from "./obsidian/modals";
 import { TezcaSettingTab } from "./obsidian/settings";
@@ -100,6 +101,39 @@ export default class TezcaPlugin extends Plugin {
 		this.addCommand({ id: "reconnect", name: "Reconnect to sync host", callback: () => this.engine?.conn.reconnectNow() });
 		this.addCommand({ id: "pair-device", name: "Pair another device", callback: () => void this.pairDevice() });
 		this.addCommand({ id: "show-recovery-phrase", name: "Show recovery phrase", callback: () => void this.showRecoveryPhrase() });
+		this.addCommand({
+			id: "file-history",
+			name: "Show version history of the current file",
+			checkCallback: (checking) => {
+				const file = this.app.workspace.getActiveFile();
+				const mirror = this.engine?.mirror;
+				if (!file || !mirror?.isReady) return false;
+				if (!checking) new HistoryModal(this.app, mirror, file).open();
+				return true;
+			},
+		});
+		this.addCommand({
+			id: "recently-deleted",
+			name: "Show recently deleted files",
+			checkCallback: (checking) => {
+				const mirror = this.engine?.mirror;
+				if (!mirror?.isReady) return false;
+				if (!checking) new DeletedFilesModal(this.app, mirror).open();
+				return true;
+			},
+		});
+		this.registerEvent(
+			this.app.workspace.on("file-menu", (menu, file) => {
+				const mirror = this.engine?.mirror;
+				if (!(file instanceof TFile) || !mirror?.isReady) return;
+				menu.addItem((item) =>
+					item
+						.setTitle("Version history")
+						.setIcon("history")
+						.onClick(() => new HistoryModal(this.app, mirror, file).open()),
+				);
+			}),
+		);
 
 		this.registerEvent(this.app.workspace.on("layout-change", () => this.rebindOpenEditors()));
 		this.registerEvent(this.app.workspace.on("file-open", () => this.rebindOpenEditors()));
