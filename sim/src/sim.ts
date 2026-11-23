@@ -388,13 +388,19 @@ async function run(seed: number, nClients: number, steps: number, bin: string): 
 				const txt = textOf(doc).toString();
 				sp.release(e.id);
 				const lin = lineageOf(txt);
-				if (lin && lostLins.has(lin)) problems.push(`  lineage ${lin} is entry ${e.id.slice(0, 6)} path=${e.path} deleted=${e.deleted} text=${JSON.stringify(txt.slice(0, 80))}`);
+				if (lin && lostLins.has(lin)) {
+					problems.push(`  lineage ${lin} is entry ${e.id.slice(0, 6)} path=${e.path} deleted=${e.deleted} text=${JSON.stringify(txt.slice(0, 80))}`);
+					const names = new Set([e.path.split("/").pop()!]);
+					for (const o of ops) if (o.includes(e.path.split("/").pop()!)) for (const m of o.matchAll(/([\w-]+\.md)/g)) names.add(m[1]);
+					for (const o of ops) if ([...names].some((n) => o.includes(n))) problems.push(`     op ${o}`);
+				}
 			}
 		}
 
 		if (!ok || problems.length) {
 			console.log(`✗ seed ${seed}: ${problems.length} problem(s)`);
-			for (const p of problems.slice(0, 40)) console.log("   " + p);
+			for (const p of problems.slice(0, 80)) console.log("   " + p);
+			if (process.env.SIM_ALL_OPS) for (const o of ops) console.log("     " + o);
 			if (!VERBOSE) {
 				console.log("   last ops:");
 				for (const o of ops.slice(-15)) console.log("     " + o);

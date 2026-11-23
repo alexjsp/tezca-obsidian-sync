@@ -183,6 +183,16 @@ arrived. The file now follows the rename when it is exactly this entry's upload 
 edit raced the rename) it is imported as a file of its own. A looser first fix (move it whenever no other entry
 claims the old path) let a collision loser take over a deleted winner's file, which the simulator also caught.
 
+Also found by longer simulator runs (250 steps; both reproduce on 0.1.2): a local edit racing a remote delete
+created a duplicate entry, and the collision re-check then left the original note missing from that device's
+disk. Fixed. After the fixes: attachment seeds 12000–12035 all pass; notes-only 13000–13035 pass 35/36.
+
+Open question (seed 13007, notes-only, timing-dependent, ~1 in 4 reruns): a note ends up deleted everywhere
+although the simulator didn't attribute a delete to its content. Most likely an offline device deleting a
+stale copy after other devices' edits had already synced (edits only protect a file while they are unsynced),
+possibly misattributed by the simulator. The text stays in the doc and "Recently deleted" restores it. Needs
+a decision: should an edit made after (in wall-clock terms) a concurrent offline delete revive the file?
+
 Not done in M2:
 - Blob garbage collection. The server keeps every blob; the host can't see which ones the encrypted index still
   references, so GC has to be client-driven (an owner device lists live references, the server deletes the rest
