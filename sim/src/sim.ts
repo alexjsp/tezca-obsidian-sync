@@ -5,7 +5,7 @@
 //   3. no data loss: every appended token survives unless its file was deleted
 //   4. attachments: every version written survives on disk, in a conflict copy, or in history
 //
-// Usage: pnpm sim [--seed N] [--clients N] [--steps N] [--runs N] [--verbose] [--no-blobs]
+// Usage: pnpm sim [--seed N] [--clients N] [--steps N] [--runs N] [--verbose] [--no-blobs] [--shares]
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -32,6 +32,8 @@ const arg = (name: string, def: number) => {
 };
 const VERBOSE = args.includes("--verbose");
 const NO_BLOBS = args.includes("--no-blobs");
+/** Two users (C0,C1 = user 0; C2,C3 = user 1). User 0 shares folder "s"; user 1 mounts it at "s". */
+const SHARES = args.includes("--shares");
 log.level = VERBOSE ? "info" : "error";
 
 // ───────────── PRNG ─────────────
@@ -92,6 +94,9 @@ interface SimClient {
 	sockets: Set<WebSocket>;
 	offline: boolean; // network cut
 	stopped: boolean; // plugin not running
+	user: number;
+	id?: Identity;
+	rootSpaceId?: string;
 }
 
 function wsFactory(c: SimClient): WSCtor {
@@ -117,23 +122,51 @@ function httpFor(c: SimClient): HttpFn {
 
 /** Synced files of a client: Markdown as text, others as a fingerprint. */
 function snap(c: SimClient): [string, string][] {
+	// Local-only files (kept after a delete elsewhere, with a notice) are deliberately not synced.
+	const localOnly = new Set(c.engine ? spacesOf(c).flatMap(({ mirror }) => (mirror as unknown as { state: { localOnly: string[] } }).state.localOnly) : []);
 	return [...c.vault.files]
-		.filter(([p]) => !p.includes("(conflict"))
+		.filter(([p]) => !p.includes("(conflict") && !localOnly.has(p))
 		.map(([p, v]): [string, string] => [p, p.endsWith(".md") ? (typeof v === "string" ? v : new TextDecoder().decode(v)) : fp(v)])
 		.sort(([a], [b]) => (a < b ? -1 : 1));
+}
+
+/** Every mounted space of a client: its mirror, space, and the vault prefix of its paths. */
+function spacesOf(c: SimClient) {
+	const e = c.engine!;
+	return [e.root!, ...e.shares.values()].map((m) => ({ mirror: m.mirror, space: m.space, prefix: m.mount ? m.mount + "/" : "" }));
+}
+
+/** Which other clients a path must match on: the same user's devices, plus everyone for shared paths. */
+function peersFor(clients: SimClient[], c: SimClient, path: string): SimClient[] {
+	return clients.filter((o) => o.user === c.user || (SHARES && path.startsWith("s/")));
+}
+
+function converged(clients: SimClient[]): boolean {
+	const snaps = clients.map((c) => new Map(snap(c)));
+	for (let i = 0; i < clients.length; i++)
+		for (let j = 0; j < clients.length; j++) {
+			if (i === j) continue;
+			const sameUser = clients[i].user === clients[j].user;
+			for (const [p, v] of snaps[i]) {
+				if (!sameUser && !(SHARES && p.startsWith("s/"))) continue;
+				if (snaps[j].get(p) !== v) return false;
+			}
+		}
+	return true;
 }
 
 function fp(v: string | Uint8Array): string {
 	return bytesFingerprint(typeof v === "string" ? new TextEncoder().encode(v) : v);
 }
 
-async function startEngine(c: SimClient, url: string, id: Identity, spaceId: string) {
+async function startEngine(c: SimClient, url: string) {
 	c.engine = new SyncEngine({
 		host: url,
-		identity: id,
+		identity: c.id!,
 		deviceId: c.name,
 		deviceName: c.name,
-		spaceId,
+		spaceId: c.rootSpaceId!,
+		profile: () => ({ name: `user${c.user}`, color: "#888888" }),
 		store: c.store,
 		vault: c.vault,
 		clientVersion: "sim",
@@ -169,22 +202,44 @@ async function run(seed: number, nClients: number, steps: number, bin: string): 
 	const server = await startServer(bin);
 	const clients: SimClient[] = [];
 	try {
-		const id = identityFromSeed(randomBytes(32));
-		await new HostApi(server.url).claim("simcode", id);
-		const setup = new HostConnection({ host: server.url, identity: id, deviceId: "setup", clientVersion: "sim", WebSocketImpl: WebSocket as unknown as WSCtor });
-		setup.start();
-		await waitOnline(setup);
-		const space = await createRootSpace(setup, id, "sim");
-		setup.stop();
+		const api = new HostApi(server.url);
+		const makeUser = async (admin: Identity | null) => {
+			const id = identityFromSeed(randomBytes(32));
+			if (!admin) await api.claim("simcode", id);
+			else await api.redeem((await api.createInvite(admin)).token, id);
+			const setup = new HostConnection({ host: server.url, identity: id, deviceId: "setup", clientVersion: "sim", WebSocketImpl: WebSocket as unknown as WSCtor });
+			setup.start();
+			await waitOnline(setup);
+			const space = await createRootSpace(setup, id, "sim");
+			setup.stop();
+			return { id, spaceId: space.spaceId };
+		};
+		const users = [await makeUser(null)];
+		if (SHARES) users.push(await makeUser(users[0].id));
 
 		for (let i = 0; i < nClients; i++) {
-			const c: SimClient = { name: `C${i}`, vault: new MemoryVault(), store: new MemoryStore(), engine: null, sockets: new Set(), offline: false, stopped: true };
+			const user = SHARES && i >= nClients / 2 ? 1 : 0;
+			const c: SimClient = { name: `C${i}`, vault: new MemoryVault(), store: new MemoryStore(), engine: null, sockets: new Set(), offline: false, stopped: true, user, id: users[user].id, rootSpaceId: users[user].spaceId };
 			clients.push(c);
-			await startEngine(c, server.url, id, space.spaceId);
+			await startEngine(c, server.url);
+		}
+		if (SHARES) {
+			// User 0 shares "s"; user 1 joins and mounts it at "s" too (so paths compare directly).
+			const owner = clients[0];
+			await owner.vault.userWrite("s/readme.md", "lineage:Lshare\nshared\n");
+			await owner.engine!.idle();
+			const sid = await owner.engine!.shareFolder("s", "shared");
+			for (let i = 0; i < 100 && !owner.engine!.shares.has(sid); i++) await sleep(50);
+			const link = await owner.engine!.createInvite(sid, "editor");
+			const u = new URL(link.replace("obsidian://tezca", "http://x/"));
+			const joiner = clients.find((c) => c.user === 1)!;
+			await joiner.engine!.joinShare(u.searchParams.get("token")!, u.searchParams.get("k")!, async () => "s");
+			for (let i = 0; i < 200 && !clients.every((c) => c.engine!.shares.has(sid)); i++) await sleep(50);
+			if (!clients.every((c) => c.engine!.shares.has(sid))) throw new Error("share setup failed");
 		}
 
 		let tok = 0;
-		const folders = ["", "a/", "a/b/", "c/"];
+		const folders = SHARES ? ["", "a/", "s/", "s/x/"] : ["", "a/", "a/b/", "c/"];
 		const mdFiles = (c: SimClient) => [...c.vault.files.keys()].filter((p) => p.endsWith(".md") && !p.includes("(conflict"));
 		const binFiles = (c: SimClient) => [...c.vault.files.keys()].filter((p) => !p.endsWith(".md") && !p.includes("(conflict"));
 		const randomBlob = (label: string) => {
@@ -253,6 +308,11 @@ async function run(seed: number, nClients: number, steps: number, bin: string): 
 				} else if (r < 0.77) {
 					const p = pick(files);
 					const to = `${pick(folders)}renamed-${step}.md`;
+					// Moving into/out of a shared folder is copy + delete for the side it left (by design).
+					if (SHARES && p.startsWith("s/") !== to.startsWith("s/")) {
+						const lin = lineageOf(c.vault.files.get(p) as string);
+						if (lin) deletedLineages.add(lin);
+					}
 					if (!c.vault.files.has(to)) await c.vault.rename(p, to);
 					op = `rename ${p} → ${to}`;
 				} else if (r < 0.8) {
@@ -278,7 +338,7 @@ async function run(seed: number, nClients: number, steps: number, bin: string): 
 						if (lin) tokens.set(t, lin);
 						c.vault.files.set(p, c.vault.files.get(p)! + `${t}\n`);
 					}
-					await startEngine(c, server.url, id, space.spaceId);
+					await startEngine(c, server.url);
 					op = "restart with offline edit";
 				} else {
 					await sleep(Math.floor(rnd() * 200));
@@ -310,14 +370,18 @@ async function run(seed: number, nClients: number, steps: number, bin: string): 
 					const v = c.vault.files.get(p);
 					return v === undefined ? undefined : p.endsWith(".md") ? v : fp(v);
 				});
-				if (vals.every((v) => v === vals[0])) continue;
+				const differs = clients.some((c, i) => peersFor(clients, c, p).some((o) => vals[clients.indexOf(o)] !== vals[i]));
+				if (!differs) continue;
 				problems.push(`differs ${p}: ` + clients.map((c, i) => `${c.name}=${JSON.stringify(vals[i])}`).join(" "));
 				const base = p.split("/").pop()!;
 				for (const o of ops) if (o.includes(base)) problems.push(`   op ${o}`);
 				for (const c of clients) {
-					const es = c.engine!.mirror!.index.all().filter((x) => x.path === p);
-					const st = (c.engine!.mirror! as unknown as { state: { baselines: Record<string, unknown>; localOnly: string[] } }).state;
-					problems.push(`   ${c.name} entries: ${JSON.stringify(es.map((x) => ({ id: x.id.slice(0, 6), kind: x.kind, deleted: x.deleted, blob: x.blob?.hash?.slice(0, 8), base: st.baselines[x.id] })))} localOnly=${st.localOnly.includes(p)}`);
+					for (const { mirror, prefix } of spacesOf(c)) {
+						const es = mirror.index.all().filter((x) => prefix + x.path === p);
+						const st = (mirror as unknown as { state: { baselines: Record<string, unknown>; localOnly: string[] } }).state;
+						if (!es.length && !st.localOnly.includes(p)) continue;
+						problems.push(`   ${c.name}[${prefix || "root"}] entries: ${JSON.stringify(es.map((x) => ({ id: x.id.slice(0, 6), kind: x.kind, deleted: x.deleted, blob: x.blob?.hash?.slice(0, 8), base: st.baselines[x.id] })))} localOnly=${st.localOnly.includes(p)}`);
+					}
 				}
 				const sp = clients.map((c) => {
 					const e = c.engine!.mirror!.index.live().find((x) => x.path === p);
@@ -331,22 +395,26 @@ async function run(seed: number, nClients: number, steps: number, bin: string): 
 
 		// 2b. attachments: disk equals the entry's current version
 		for (const c of clients) {
-			for (const e of c.engine!.mirror!.index.live()) {
-				if (e.kind !== "blob") continue;
-				const disk = c.vault.files.get(e.path);
-				const dh = disk === undefined ? null : fp(disk);
-				if (dh !== (e.blob?.hash ?? null)) problems.push(`${c.name}: ${e.path} disk≠index blob (disk ${dh}, index ${e.blob?.hash})`);
+			for (const { mirror, prefix } of spacesOf(c)) {
+				for (const e of mirror.index.live()) {
+					if (e.kind !== "blob") continue;
+					const disk = c.vault.files.get(prefix + e.path);
+					const dh = disk === undefined ? null : fp(disk);
+					if (dh !== (e.blob?.hash ?? null)) problems.push(`${c.name}: ${prefix + e.path} disk≠index blob (disk ${dh}, index ${e.blob?.hash})`);
+				}
 			}
 		}
 		// 4. no attachment version vanished
 		{
 			const seen = new Set<string>();
 			for (const c of clients) for (const [, v] of c.vault.files) seen.add(fp(v));
-			for (const e of clients[0].engine!.mirror!.index.all()) {
-				if (e.kind !== "blob") continue;
-				if (e.blob) seen.add(e.blob.hash);
-				for (const r of e.prev ?? []) seen.add(r.hash);
-			}
+			for (const c of clients)
+				for (const { mirror } of spacesOf(c))
+					for (const e of mirror.index.all()) {
+						if (e.kind !== "blob") continue;
+						if (e.blob) seen.add(e.blob.hash);
+						for (const r of e.prev ?? []) seen.add(r.hash);
+					}
 			let missing = 0;
 			for (const [h, label] of blobsWritten) {
 				if (label === "deleted" || label === "superseded" || seen.has(h)) continue;
@@ -356,15 +424,15 @@ async function run(seed: number, nClients: number, steps: number, bin: string): 
 
 		// 2. mirror consistency
 		for (const c of clients) {
-			const sp = c.engine!.space!;
-			const mirror = c.engine!.mirror!;
-			for (const e of mirror.index.live()) {
-				if (e.kind !== "md") continue;
-				const doc = await sp.acquire(e.id);
-				const crdt = textOf(doc).toString();
-				sp.release(e.id);
-				const disk = c.vault.files.get(e.path);
-				if (disk !== crdt) problems.push(`${c.name}: ${e.path} disk≠crdt (disk ${JSON.stringify(disk?.slice(0, 60))}, crdt ${JSON.stringify(crdt.slice(0, 60))})`);
+			for (const { mirror, space: sp, prefix } of spacesOf(c)) {
+				for (const e of mirror.index.live()) {
+					if (e.kind !== "md") continue;
+					const doc = await sp.acquire(e.id);
+					const crdt = textOf(doc).toString();
+					sp.release(e.id);
+					const disk = c.vault.files.get(prefix + e.path);
+					if (disk !== crdt) problems.push(`${c.name}: ${prefix + e.path} disk≠crdt (disk ${JSON.stringify(disk?.slice(0, 60))}, crdt ${JSON.stringify(crdt.slice(0, 60))})`);
+				}
 			}
 		}
 		// 3. no data loss
@@ -427,7 +495,7 @@ async function quiesce(clients: SimClient[]): Promise<boolean> {
 		await Promise.all(clients.map((c) => c.engine!.idle()));
 		const snaps = clients.map((c) => JSON.stringify(snap(c)));
 		const all = snaps.join("|");
-		const same = snaps.every((s) => s === snaps[0]);
+		const same = converged(clients);
 		const online = clients.every((c) => c.engine!.conn.status === "online");
 		if (same && online && all === last) {
 			if (!stableSince) stableSince = Date.now();
