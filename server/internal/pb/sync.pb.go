@@ -1613,6 +1613,7 @@ type ServerFrame struct {
 	//	*ServerFrame_Pong
 	//	*ServerFrame_VersionList
 	//	*ServerFrame_VersionData
+	//	*ServerFrame_SpaceChanged
 	Msg           isServerFrame_Msg `protobuf_oneof:"msg"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1790,6 +1791,15 @@ func (x *ServerFrame) GetVersionData() *VersionData {
 	return nil
 }
 
+func (x *ServerFrame) GetSpaceChanged() *SpaceChanged {
+	if x != nil {
+		if x, ok := x.Msg.(*ServerFrame_SpaceChanged); ok {
+			return x.SpaceChanged
+		}
+	}
+	return nil
+}
+
 type isServerFrame_Msg interface {
 	isServerFrame_Msg()
 }
@@ -1854,6 +1864,10 @@ type ServerFrame_VersionData struct {
 	VersionData *VersionData `protobuf:"bytes,15,opt,name=version_data,json=versionData,proto3,oneof"`
 }
 
+type ServerFrame_SpaceChanged struct {
+	SpaceChanged *SpaceChanged `protobuf:"bytes,16,opt,name=space_changed,json=spaceChanged,proto3,oneof"`
+}
+
 func (*ServerFrame_Challenge) isServerFrame_Msg() {}
 
 func (*ServerFrame_AuthOk) isServerFrame_Msg() {}
@@ -1883,6 +1897,8 @@ func (*ServerFrame_Pong) isServerFrame_Msg() {}
 func (*ServerFrame_VersionList) isServerFrame_Msg() {}
 
 func (*ServerFrame_VersionData) isServerFrame_Msg() {}
+
+func (*ServerFrame_SpaceChanged) isServerFrame_Msg() {}
 
 type Challenge struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
@@ -3112,6 +3128,53 @@ func (x *VersionData) GetSig() []byte {
 	return nil
 }
 
+// Pushed to every connected session of every current (and just-removed) member when a space's
+// membership, roles, epoch or keys change. Clients re-run ListSpaces. A space missing from the
+// new list means the caller was removed.
+type SpaceChanged struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SpaceId       string                 `protobuf:"bytes,1,opt,name=space_id,json=spaceId,proto3" json:"space_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SpaceChanged) Reset() {
+	*x = SpaceChanged{}
+	mi := &file_tezca_v1_sync_proto_msgTypes[37]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SpaceChanged) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SpaceChanged) ProtoMessage() {}
+
+func (x *SpaceChanged) ProtoReflect() protoreflect.Message {
+	mi := &file_tezca_v1_sync_proto_msgTypes[37]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SpaceChanged.ProtoReflect.Descriptor instead.
+func (*SpaceChanged) Descriptor() ([]byte, []int) {
+	return file_tezca_v1_sync_proto_rawDescGZIP(), []int{37}
+}
+
+func (x *SpaceChanged) GetSpaceId() string {
+	if x != nil {
+		return x.SpaceId
+	}
+	return ""
+}
+
 var File_tezca_v1_sync_proto protoreflect.FileDescriptor
 
 const file_tezca_v1_sync_proto_rawDesc = "" +
@@ -3215,7 +3278,7 @@ const file_tezca_v1_sync_proto_rawDesc = "" +
 	"\x05epoch\x18\x03 \x01(\rR\x05epoch\x12\x18\n" +
 	"\apayload\x18\x04 \x01(\fR\apayload\"\x14\n" +
 	"\x04Ping\x12\f\n" +
-	"\x01t\x18\x01 \x01(\x04R\x01t\"\x90\x06\n" +
+	"\x01t\x18\x01 \x01(\x04R\x01t\"\xcf\x06\n" +
 	"\vServerFrame\x123\n" +
 	"\tchallenge\x18\x01 \x01(\v2\x13.tezca.v1.ChallengeH\x00R\tchallenge\x12+\n" +
 	"\aauth_ok\x18\x02 \x01(\v2\x10.tezca.v1.AuthOkH\x00R\x06authOk\x124\n" +
@@ -3233,7 +3296,8 @@ const file_tezca_v1_sync_proto_rawDesc = "" +
 	"\x05error\x18\f \x01(\v2\x0f.tezca.v1.ErrorH\x00R\x05error\x12$\n" +
 	"\x04pong\x18\r \x01(\v2\x0e.tezca.v1.PongH\x00R\x04pong\x12:\n" +
 	"\fversion_list\x18\x0e \x01(\v2\x15.tezca.v1.VersionListH\x00R\vversionList\x12:\n" +
-	"\fversion_data\x18\x0f \x01(\v2\x15.tezca.v1.VersionDataH\x00R\vversionDataB\x05\n" +
+	"\fversion_data\x18\x0f \x01(\v2\x15.tezca.v1.VersionDataH\x00R\vversionData\x12=\n" +
+	"\rspace_changed\x18\x10 \x01(\v2\x16.tezca.v1.SpaceChangedH\x00R\fspaceChangedB\x05\n" +
 	"\x03msg\"i\n" +
 	"\tChallenge\x12\x14\n" +
 	"\x05nonce\x18\x01 \x01(\fR\x05nonce\x12\x1b\n" +
@@ -3328,7 +3392,9 @@ const file_tezca_v1_sync_proto_rawDesc = "" +
 	"\x06doc_id\x18\x03 \x01(\tR\x05docId\x12)\n" +
 	"\x04info\x18\x04 \x01(\v2\x15.tezca.v1.VersionInfoR\x04info\x12\x18\n" +
 	"\apayload\x18\x05 \x01(\fR\apayload\x12\x10\n" +
-	"\x03sig\x18\x06 \x01(\fR\x03sig*j\n" +
+	"\x03sig\x18\x06 \x01(\fR\x03sig\")\n" +
+	"\fSpaceChanged\x12\x19\n" +
+	"\bspace_id\x18\x01 \x01(\tR\aspaceId*j\n" +
 	"\tSpaceKind\x12\x1a\n" +
 	"\x16SPACE_KIND_UNSPECIFIED\x10\x00\x12\x13\n" +
 	"\x0fSPACE_KIND_ROOT\x10\x01\x12\x14\n" +
@@ -3369,7 +3435,7 @@ func file_tezca_v1_sync_proto_rawDescGZIP() []byte {
 }
 
 var file_tezca_v1_sync_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-var file_tezca_v1_sync_proto_msgTypes = make([]protoimpl.MessageInfo, 37)
+var file_tezca_v1_sync_proto_msgTypes = make([]protoimpl.MessageInfo, 38)
 var file_tezca_v1_sync_proto_goTypes = []any{
 	(SpaceKind)(0),           // 0: tezca.v1.SpaceKind
 	(SpaceRole)(0),           // 1: tezca.v1.SpaceRole
@@ -3412,6 +3478,7 @@ var file_tezca_v1_sync_proto_goTypes = []any{
 	(*VersionList)(nil),      // 38: tezca.v1.VersionList
 	(*GetVersion)(nil),       // 39: tezca.v1.GetVersion
 	(*VersionData)(nil),      // 40: tezca.v1.VersionData
+	(*SpaceChanged)(nil),     // 41: tezca.v1.SpaceChanged
 }
 var file_tezca_v1_sync_proto_depIdxs = []int32{
 	0,  // 0: tezca.v1.SpaceInfo.kind:type_name -> tezca.v1.SpaceKind
@@ -3449,19 +3516,20 @@ var file_tezca_v1_sync_proto_depIdxs = []int32{
 	35, // 32: tezca.v1.ServerFrame.pong:type_name -> tezca.v1.Pong
 	38, // 33: tezca.v1.ServerFrame.version_list:type_name -> tezca.v1.VersionList
 	40, // 34: tezca.v1.ServerFrame.version_data:type_name -> tezca.v1.VersionData
-	2,  // 35: tezca.v1.AuthOk.role:type_name -> tezca.v1.HostRole
-	5,  // 36: tezca.v1.SpaceList.spaces:type_name -> tezca.v1.SpaceInfo
-	5,  // 37: tezca.v1.SpaceCreated.space:type_name -> tezca.v1.SpaceInfo
-	7,  // 38: tezca.v1.DocHeads.heads:type_name -> tezca.v1.DocHead
-	8,  // 39: tezca.v1.Updates.updates:type_name -> tezca.v1.Update
-	3,  // 40: tezca.v1.Error.code:type_name -> tezca.v1.ErrorCode
-	37, // 41: tezca.v1.VersionList.versions:type_name -> tezca.v1.VersionInfo
-	37, // 42: tezca.v1.VersionData.info:type_name -> tezca.v1.VersionInfo
-	43, // [43:43] is the sub-list for method output_type
-	43, // [43:43] is the sub-list for method input_type
-	43, // [43:43] is the sub-list for extension type_name
-	43, // [43:43] is the sub-list for extension extendee
-	0,  // [0:43] is the sub-list for field type_name
+	41, // 35: tezca.v1.ServerFrame.space_changed:type_name -> tezca.v1.SpaceChanged
+	2,  // 36: tezca.v1.AuthOk.role:type_name -> tezca.v1.HostRole
+	5,  // 37: tezca.v1.SpaceList.spaces:type_name -> tezca.v1.SpaceInfo
+	5,  // 38: tezca.v1.SpaceCreated.space:type_name -> tezca.v1.SpaceInfo
+	7,  // 39: tezca.v1.DocHeads.heads:type_name -> tezca.v1.DocHead
+	8,  // 40: tezca.v1.Updates.updates:type_name -> tezca.v1.Update
+	3,  // 41: tezca.v1.Error.code:type_name -> tezca.v1.ErrorCode
+	37, // 42: tezca.v1.VersionList.versions:type_name -> tezca.v1.VersionInfo
+	37, // 43: tezca.v1.VersionData.info:type_name -> tezca.v1.VersionInfo
+	44, // [44:44] is the sub-list for method output_type
+	44, // [44:44] is the sub-list for method input_type
+	44, // [44:44] is the sub-list for extension type_name
+	44, // [44:44] is the sub-list for extension extendee
+	0,  // [0:44] is the sub-list for field type_name
 }
 
 func init() { file_tezca_v1_sync_proto_init() }
@@ -3501,6 +3569,7 @@ func file_tezca_v1_sync_proto_init() {
 		(*ServerFrame_Pong)(nil),
 		(*ServerFrame_VersionList)(nil),
 		(*ServerFrame_VersionData)(nil),
+		(*ServerFrame_SpaceChanged)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -3508,7 +3577,7 @@ func file_tezca_v1_sync_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_tezca_v1_sync_proto_rawDesc), len(file_tezca_v1_sync_proto_rawDesc)),
 			NumEnums:      4,
-			NumMessages:   37,
+			NumMessages:   38,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -183,6 +183,7 @@ message ServerFrame {
     Pong pong = 13;
     VersionList version_list = 14;
     VersionData version_data = 15;
+    SpaceChanged space_changed = 16;
   }
 }
 
@@ -314,4 +315,13 @@ message VersionData {
   VersionInfo info = 4;
   bytes payload = 5;  // encrypted exactly as a Snapshot payload
   bytes sig = 6;      // the uploader's PutSnapshot sig
+}
+
+// ── Shares (M3) ──
+
+// Pushed to every connected session of every current (and just-removed) member when a space's
+// membership, roles, epoch or keys change. Clients re-run ListSpaces. A space missing from the
+// new list means the caller was removed.
+message SpaceChanged {
+  string space_id = 1;
 }

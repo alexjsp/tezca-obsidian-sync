@@ -190,8 +190,9 @@ disk. Fixed. After the fixes: attachment seeds 12000–12035 all pass; notes-onl
 Open question (seed 13007, notes-only, timing-dependent, ~1 in 4 reruns): a note ends up deleted everywhere
 although the simulator didn't attribute a delete to its content. Most likely an offline device deleting a
 stale copy after other devices' edits had already synced (edits only protect a file while they are unsynced),
-possibly misattributed by the simulator. The text stays in the doc and "Recently deleted" restores it. Needs
-a decision: should an edit made after (in wall-clock terms) a concurrent offline delete revive the file?
+possibly misattributed by the simulator. The text stays in the doc and "Recently deleted" restores it.
+Decision (2026-11-23): the delete stands; edits only protect a file while they are unsynced. Recovery is via
+"Recently deleted".
 
 Verified in real use (0.2.0): Mac uploaded 295 attachments (50 MB) to the Unraid host; iPhone downloaded them.
 
