@@ -688,7 +688,7 @@ export class DiskMirror {
 		}
 		if (this.consumeExpectedHash(vp, bytesFingerprint(D))) return;
 		const e = this.entryByPath(rel);
-		if (!e) return this.createBlobEntry(rel, D);
+		if (!e) return this.importNewFile(vp);
 		if (e.kind !== "blob") return;
 		if (!this.state.baselines[e.id]) {
 			// We never materialized this entry here: the file on disk is a different file.
@@ -722,6 +722,10 @@ export class DiskMirror {
 	}
 
 	private async importNewFile(vp: string): Promise<void> {
+		// A file we materialized whose entry was deleted elsewhere is not new: decide delete vs
+		// revive (local edits win) instead of creating a duplicate entry.
+		const tomb = this.entryByPath(this.toRel(vp)!) ? undefined : this.tombstonedAt(this.toRel(vp)!);
+		if (tomb) return this.handleRemoteDelete(tomb, vp);
 		if (fileKind(vp) === "blob") {
 			const rel = this.toRel(vp)!;
 			const existing = this.entryByPath(rel);
@@ -759,13 +763,25 @@ export class DiskMirror {
 	private applyCollisionRenames(): void {
 		const { renames } = this.index.resolvePaths();
 		for (const r of renames) {
+			const contested = canonicalPath(this.index.get(r.id)?.path ?? "");
 			this.index.setPath(r.id, r.path, LOCAL_ORIGIN);
 			this.touch(r.id);
-			for (const [id, b] of Object.entries(this.state.baselines)) {
-				// whoever is on disk at the contested path must be re-verified too
-				if (id !== r.id && canonicalPath(b.path) === canonicalPath(this.index.get(r.id)?.path ?? "")) this.touch(id);
-			}
+			// The winner of the contested path must be re-verified too: the loser's file may be the
+			// one on disk there and is about to move away.
+			for (const e of this.index.live()) if (e.id !== r.id && canonicalPath(e.path) === contested) this.touch(e.id);
+			for (const [id, b] of Object.entries(this.state.baselines)) if (id !== r.id && canonicalPath(b.path) === contested) this.touch(id);
 		}
+	}
+
+	/** A deleted entry we last materialized at `rel` (its remote delete not yet applied here). */
+	private tombstonedAt(rel: string): Entry | undefined {
+		const k = canonicalPath(rel);
+		for (const [id, b] of Object.entries(this.state.baselines)) {
+			if (canonicalPath(b.path) !== k) continue;
+			const e = this.index.get(id);
+			if (e?.deleted) return e;
+		}
+		return undefined;
 	}
 
 	private async importNewFolder(vp: string): Promise<void> {
