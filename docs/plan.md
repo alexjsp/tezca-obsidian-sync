@@ -282,5 +282,10 @@ Found by the simulator during M4/M5: a verify that ran before a queued local del
 missing and wrote it back, leaving it untracked once the delete was handled (existed since M1); now
 skipped for paths with a pending delete/move.
 
+Also found in the final simulator runs: a rename made while sync was starting (before the startup
+reconcile) was read as "deleted while closed" plus a new file, detaching the note from other devices'
+concurrent edits (existed since M1; events made before the reconcile are now applied first); and an edit
+that raced a remote rename is now kept as "name (edited on <device>)" instead of at the old path.
+
 Not done in M5: a canvas open in Obsidian picks up remote changes when Obsidian reloads the file from disk
 (no live canvas editor binding like Markdown's); converting existing attachment-kind canvases to live ones.
