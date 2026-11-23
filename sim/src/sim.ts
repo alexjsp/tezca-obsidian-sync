@@ -489,6 +489,21 @@ async function run(seed: number, nClients: number, steps: number, bin: string): 
 			}
 		}
 		if (lost > 10) problems.push(`… ${lost} tokens lost in total`);
+		// Where (if anywhere) do lost tokens still exist in a CRDT? (any client, any space, deleted too)
+		if (lost) {
+			const lostTokens = [...tokens].filter(([t, l]) => !deletedLineages.has(l) && !new RegExp(`(^|\\n)${t}(\\n|$)`).test(union)).map(([t]) => t).slice(0, 3);
+			for (const c of clients)
+				for (const { mirror, space: sp, prefix } of spacesOf(c))
+					for (const e of mirror.index.all()) {
+						if (e.kind !== "md") continue;
+						const doc = await sp.acquire(e.id);
+						const txt = textOf(doc).toString();
+						sp.release(e.id);
+						for (const t of lostTokens)
+							if (new RegExp(`(^|\\n)${t}(\\n|$)`).test(txt))
+								problems.push(`  ${t} is in ${c.name} ${prefix}${e.path} (entry ${e.id.slice(0, 6)}, deleted=${e.deleted}, disk=${JSON.stringify(String(c.vault.files.get(prefix + e.path) ?? "<none>").slice(0, 40))})`);
+					}
+		}
 		for (const [t, lin] of canvasTokens) {
 			if (deletedLineages.has(lin) || union.includes(`"id":"${t}"`)) continue;
 			problems.push(`canvas card ${t} (canvas ${lin}) lost`);
