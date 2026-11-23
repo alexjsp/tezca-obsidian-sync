@@ -88,7 +88,10 @@ export class EditorBindings {
 	async refresh(view: EditorView): Promise<void> {
 		const path = this.pathOf(view);
 		const cur = this.bindings.get(view);
-		if (cur && cur.path === path && cur.doc) return;
+		// Already bound, or a bind for this path is in flight. Tearing down an in-flight bind here used to
+		// dispatch -> ViewPlugin.update -> queue another refresh -> tear down this one, forever (a microtask loop
+		// that froze the window).
+		if (cur && cur.path === path) return;
 		if (cur) this.unbind(view, true);
 		const engine = this.getEngine();
 		const mirror = engine?.mirror;
@@ -137,7 +140,8 @@ export class EditorBindings {
 		const b = this.bindings.get(view);
 		if (!b) return;
 		this.bindings.delete(view);
-		if (reconfigure) {
+		// A placeholder (bind in flight) never configured the compartment, so there is nothing to dispatch.
+		if (reconfigure && b.doc) {
 			try {
 				view.dispatch({ effects: collabCompartment.reconfigure([]) });
 			} catch {
