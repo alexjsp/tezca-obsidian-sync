@@ -283,11 +283,15 @@ export class SyncEngine {
 		this.starting.add(m.spaceId);
 		try {
 			let info = this.infos.get(m.spaceId) ?? (await this.cachedInfo(m.spaceId));
-			if (!info) {
+			// No info yet, or none of our wrapped keys for the current epoch (another of our devices
+			// may have mounted it right after redeeming, before its key upload reached us).
+			for (let attempt = 0; !info || !info.keys.some((k) => k.epoch === info!.epoch); attempt++) {
+				if (attempt >= 20) throw new Error("this device hasn't received the shared folder's key yet");
+				if (attempt) await new Promise((r) => setTimeout(r, Math.min(30_000, 500 * attempt)));
 				await waitOnline(this.conn, 24 * 3600_000);
 				await this.refreshInfos();
+				if (!this.mounts?.get(m.spaceId)) return; // unmounted meanwhile (e.g. access removed)
 				info = this.infos.get(m.spaceId) ?? null;
-				if (!info) return; // refreshInfos unmounted it
 			}
 			const fresh = !(await this.opts.store.get(`mirror/${m.spaceId}`));
 			if (!fresh && !(await this.opts.vault.exists(m.path))) {
@@ -330,7 +334,23 @@ export class SyncEngine {
 
 	/** Follow a mount folder being moved or deleted (before the mirrors see the events). */
 	private onVaultEvent(e: { type: string; path: string; oldPath?: string; kind: "file" | "folder" }) {
-		if (!this.mounts || e.kind !== "folder") return;
+		if (!this.mounts) return;
+		if (e.type === "rename" && e.oldPath && !(e.kind === "folder" && this.mounts.all().some((m) => within(m.path, e.oldPath!)))) {
+			// A move across a shared folder's edge is a copy into the destination plus a delete from the source.
+			const from = this.mounts.containing(e.oldPath);
+			const to = this.mounts.containing(e.path);
+			if (from?.spaceId !== to?.spaceId) {
+				const what = e.kind === "folder" ? "folder" : "file";
+				this.notices.emit({
+					kind: "preserved",
+					message: from
+						? `Moved "${e.path}" out of the shared folder "${from.path}": it's now ${to ? `in "${to.path}"` : "private"}, and the other members no longer have this ${what}.`
+						: `Moved "${e.path}" into the shared folder "${to!.path}": its members can see this ${what} now.`,
+					paths: [e.path],
+				});
+			}
+		}
+		if (e.kind !== "folder") return;
 		if (e.type === "rename" && e.oldPath) {
 			for (const m of this.mounts.all()) {
 				if (!within(m.path, e.oldPath)) continue;

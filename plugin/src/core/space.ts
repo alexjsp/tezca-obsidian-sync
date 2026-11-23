@@ -14,6 +14,7 @@ export interface SpaceContext {
 	conn: HostConnection;
 	store: LocalStore;
 	keyFor(epoch: number): Uint8Array;
+	hasKey(epoch: number): boolean;
 	currentEpoch(): number;
 	canWrite(): boolean;
 	isWriter(pk: Uint8Array): boolean;
@@ -100,18 +101,28 @@ export class SpaceSync implements SpaceContext {
 
 	applyInfo(info: SpaceInfo): void {
 		this._info = info;
+		let added = false;
 		for (const k of info.keys) {
 			if (this.keys.has(k.epoch)) continue;
 			try {
 				this.keys.set(k.epoch, unwrapKey(k.wrapped, this.identity));
+				added = true;
 			} catch (e) {
 				log.error(`cannot unwrap key epoch ${k.epoch} for space ${this.spaceId}`, e);
 			}
+		}
+		// A new key (first one, or after a rotation): send what was waiting for it.
+		if (added && this.slots) {
+			this.index?.retryPush();
+			for (const s of this.slots.values()) void s.loading.then((d) => d.retryPush());
 		}
 	}
 
 	// ───────────── SpaceContext ─────────────
 
+	hasKey(epoch: number): boolean {
+		return this.keys.has(epoch);
+	}
 	keyFor(epoch: number): Uint8Array {
 		const k = this.keys.get(epoch);
 		if (!k) throw new Error(`no key for epoch ${epoch} in space ${this.spaceId}`);

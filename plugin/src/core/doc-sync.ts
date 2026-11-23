@@ -270,12 +270,18 @@ export class DocSync {
 		}
 	};
 
+	/** Try sending unsent local updates again (e.g. after a key arrived). */
+	retryPush(): void {
+		this.flushPending();
+	}
+
 	private flushPending() {
 		if (!this.subscribed || this.ctx.conn.status !== "online" || !this.ctx.canWrite()) return;
 		const unsent = this.pending.filter((p) => p.ref === null);
 		if (!unsent.length) return;
-		const merged = unsent.length === 1 ? unsent[0].update : Y.mergeUpdates(unsent.map((p) => p.update));
 		const epoch = this.ctx.currentEpoch();
+		if (!this.ctx.hasKey(epoch)) return; // key not received yet; retried after the next space refresh
+		const merged = unsent.length === 1 ? unsent[0].update : Y.mergeUpdates(unsent.map((p) => p.update));
 		const payload = seal(this.ctx.keyFor(epoch), merged, ad.update(this.ctx.spaceId, this.docId, epoch));
 		const sig = sign(this.ctx.identity, sigMsg.update(this.ctx.spaceId, this.docId, epoch, payload));
 		const ref = this.ctx.allocRef(this);
@@ -311,7 +317,7 @@ export class DocSync {
 
 	private putSnapshot() {
 		if (this.snapshotInFlight !== null || this.pending.length || this.phase !== "live") return;
-		if (!this.ctx.canWrite() || this.lastSeq === 0n || !this.subscribed) return;
+		if (!this.ctx.canWrite() || this.lastSeq === 0n || !this.subscribed || !this.ctx.hasKey(this.ctx.currentEpoch())) return;
 		const epoch = this.ctx.currentEpoch();
 		const state = Y.encodeStateAsUpdate(this.ydoc);
 		const payload = seal(this.ctx.keyFor(epoch), state, ad.snapshot(this.ctx.spaceId, this.docId, epoch));
