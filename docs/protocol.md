@@ -79,7 +79,7 @@ the URL used in generated links. Otherwise the URL is taken from `X-Forwarded-Pr
 | Method & path | Auth | Body → Response |
 |---|---|---|
 | `GET /healthz` | none | `ok` |
-| `GET /api/info` | none | `{server_id, protocol_version, claimed, name, max_blob_bytes}` |
+| `GET /api/info` | none (optional HTTP sig) | `{server_id, protocol_version, claimed, name, max_blob_bytes, role?}` (`role` only for a valid signature, see M4) |
 | `GET /` | none | Setup landing page. When unclaimed, it tells the operator to run `docker compose logs` to find the claim link. |
 | `GET /claim?code=…` | claim code | HTML page with the `obsidian://` claim link + QR code. 404 if the server is claimed or the code is wrong. |
 | `POST /api/claim` | body sig | `{code, sign_pk, box_pk, sig}` → `{server_id, role:"admin"}`. One-time. `sig = sign(sigInput("redeem", server_id, code, sign_pk, box_pk))`. |
@@ -316,6 +316,47 @@ unmounts the share on this user's devices; it does not delete the share's files 
 A share's index doc has a `Y.Map` named `members`: `sign_pk b64u → Y.Map{name, color}`, written by
 each member for themselves. It names cursors and the member list. (Not a security boundary: any
 member can write any key. Signed membership is future work.)
+
+## Cross-host shares and guests (M4)
+
+### Guests
+
+A **guest** is a host user (`HostRole.GUEST`) who exists only to reach the spaces they're invited
+to. Redeeming a share invite on a host where the caller has no account creates a guest account:
+
+`POST /api/share-invites/redeem` also accepts an unregistered caller. Instead of an HTTP signature,
+the body then carries `{token, sign_pk, box_pk, sig}` with
+`sig = sign(sigInput("redeem", server_id, token, sign_pk, box_pk))` (exactly like `/api/redeem`).
+The server creates the user with role GUEST, then redeems as before. A registered caller may use
+either form. Host invites (`/api/invites`) are unaffected and still make MEMBERs.
+
+Guests:
+- can't create spaces, except **one** space of kind `PROFILE` (a second one is `CONFLICT`);
+- can do everything a member of a space can within the spaces they belong to (their role there
+  still applies);
+- can create pairings (to add their own devices);
+- have a blob quota: the total size of blobs they uploaded on this host is capped at
+  `TEZCA_GUEST_QUOTA_MB` (default 1024; 0 = unlimited). An upload over it gets 507 with
+  `{"error":"guest storage quota exceeded"}`. Blobs that already exist (dedup) don't count again.
+
+`GET /api/info` adds `role` when the request carries a valid HTTP signature (`"admin"`, `"member"`,
+`"guest"`), so a client can tell how a host sees it.
+
+### Profile space (client-defined)
+
+A user with no host of their own (a "hostless" guest) keeps their mount table in a `PROFILE` space
+on the first host that invited them, in the same `mounts` map a root space uses. That space never
+holds vault files. Its host is the one their devices pair through.
+
+### Multiple hosts
+
+A client keeps one connection per host it has spaces on. A mount records the host of a share that
+isn't on the root/profile space's host: `mounts[space_id] = {path, host?}` (`host` absent = the
+root host). Space IDs are random 128-bit values, so they don't collide across hosts; clients still
+key spaces by `(host, space_id)`.
+
+A user who has their own host and joins a share on another host becomes a guest there (unless
+they're already a user), and mounts it with `host` set.
 
 ## Index document (client-defined, opaque to the server)
 
