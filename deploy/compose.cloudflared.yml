@@ -1,0 +1,29 @@
+# Public HTTPS through a Cloudflare Tunnel (no inbound ports; works behind NAT/CGNAT).
+# 1. In Cloudflare Zero Trust → Networks → Tunnels, create a tunnel and copy its token.
+# 2. Add a public hostname (e.g. notes.example.com) with the service http://tezca:8080.
+#    Tunnels proxy WebSockets by default.
+#   cd deploy && TUNNEL_TOKEN=... TEZCA_DOMAIN=notes.example.com docker compose -f compose.cloudflared.yml up -d
+#   docker compose -f compose.cloudflared.yml logs tezca   # → claim link
+services:
+  tezca:
+    build:
+      context: ../server
+      dockerfile: ../deploy/Dockerfile
+    image: tezca-server:latest
+    restart: unless-stopped
+    environment:
+      TEZCA_PUBLIC_URL: https://${TEZCA_DOMAIN:?set TEZCA_DOMAIN}
+      TEZCA_SERVER_NAME: ${TEZCA_SERVER_NAME:-Tezca}
+    volumes:
+      - tezca-data:/data
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    depends_on: [tezca]
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?set TUNNEL_TOKEN}
+
+volumes:
+  tezca-data:

@@ -1,0 +1,9 @@
+# Used by compose.caddy.yml. TEZCA_DOMAIN comes from the environment.
+{$TEZCA_DOMAIN} {
+	encode zstd gzip
+	# reverse_proxy upgrades WebSockets transparently. Live-sync sockets are long-lived, so
+	# don't cut them on config reloads.
+	reverse_proxy tezca:8080 {
+		stream_close_delay 5m
+	}
+}

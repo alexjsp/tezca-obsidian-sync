@@ -1,0 +1,37 @@
+# Private HTTPS on your tailnet via Tailscale Serve (no ports opened to the internet).
+# Every device must be on the tailnet. Enable MagicDNS and HTTPS certificates in the Tailscale admin console.
+#   cd deploy && TS_AUTHKEY=tskey-auth-... TS_TAILNET=tail1234.ts.net docker compose -f compose.tailscale.yml up -d
+#   docker compose -f compose.tailscale.yml logs tezca   # → claim link
+services:
+  tailscale:
+    image: tailscale/tailscale:stable
+    hostname: ${TS_HOSTNAME:-tezca}
+    restart: unless-stopped
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:?set TS_AUTHKEY}
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_SERVE_CONFIG: /config/serve.json
+      TS_USERSPACE: "true"
+    volumes:
+      - ./tailscale-serve.json:/config/serve.json:ro
+      - tailscale-state:/var/lib/tailscale
+
+  tezca:
+    build:
+      context: ../server
+      dockerfile: ../deploy/Dockerfile
+    image: tezca-server:latest
+    restart: unless-stopped
+    # Share the sidecar's network namespace: Serve proxies to 127.0.0.1:8080.
+    network_mode: service:tailscale
+    depends_on: [tailscale]
+    environment:
+      TEZCA_PUBLIC_URL: https://${TS_HOSTNAME:-tezca}.${TS_TAILNET:?set TS_TAILNET, e.g. tail1234.ts.net}
+      TEZCA_SERVER_NAME: ${TEZCA_SERVER_NAME:-Tezca}
+      TEZCA_LISTEN: 127.0.0.1:8080
+    volumes:
+      - tezca-data:/data
+
+volumes:
+  tailscale-state:
+  tezca-data:

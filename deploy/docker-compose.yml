@@ -1,0 +1,20 @@
+# Plain HTTP on port 8080. Use this on a trusted LAN, or behind a reverse proxy you already run.
+#   cd deploy && docker compose up -d && docker compose logs tezca   # → claim link
+services:
+  tezca:
+    build:
+      context: ../server
+      dockerfile: ../deploy/Dockerfile
+    image: tezca-server:latest
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # The URL your devices use to reach this server (used in claim and invite links).
+      TEZCA_PUBLIC_URL: ${TEZCA_PUBLIC_URL:-}
+      TEZCA_SERVER_NAME: ${TEZCA_SERVER_NAME:-Tezca}
+    volumes:
+      - tezca-data:/data
+
+volumes:
+  tezca-data:
