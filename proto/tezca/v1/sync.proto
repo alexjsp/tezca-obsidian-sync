@@ -1,0 +1,270 @@
+// Tezca wire protocol, version 1. See docs/protocol.md for semantics.
+//
+// Every WebSocket message is exactly one binary-encoded ClientFrame (client → server)
+// or ServerFrame (server → client).
+syntax = "proto3";
+
+package tezca.v1;
+
+option go_package = "tezca/server/internal/pb;pb";
+
+// ───────────────────────── shared types ─────────────────────────
+
+enum SpaceKind {
+  SPACE_KIND_UNSPECIFIED = 0;
+  SPACE_KIND_ROOT = 1;    // a user's private vault space
+  SPACE_KIND_SHARE = 2;   // a shared folder (M3)
+  SPACE_KIND_PROFILE = 3; // a guest's profile space (M4)
+}
+
+enum SpaceRole {
+  SPACE_ROLE_UNSPECIFIED = 0;
+  SPACE_ROLE_OWNER = 1;
+  SPACE_ROLE_EDITOR = 2;
+  SPACE_ROLE_VIEWER = 3;
+}
+
+enum HostRole {
+  HOST_ROLE_UNSPECIFIED = 0;
+  HOST_ROLE_ADMIN = 1;
+  HOST_ROLE_MEMBER = 2;
+  HOST_ROLE_GUEST = 3;
+}
+
+enum ErrorCode {
+  ERROR_CODE_UNSPECIFIED = 0;
+  ERROR_CODE_BAD_REQUEST = 1;
+  ERROR_CODE_UNAUTHORIZED = 2;      // auth failed / unknown user
+  ERROR_CODE_FORBIDDEN = 3;         // authenticated but role does not allow it
+  ERROR_CODE_NOT_FOUND = 4;
+  ERROR_CODE_UPDATE_REQUIRED = 5;   // protocol_version mismatch
+  ERROR_CODE_EPOCH_STALE = 6;       // write used an epoch older than the space's current epoch
+  ERROR_CODE_CONFLICT = 7;          // e.g. space id already exists, snapshot base_seq invalid
+  ERROR_CODE_TOO_LARGE = 8;
+  ERROR_CODE_INTERNAL = 9;
+}
+
+message SpaceKey {
+  uint32 epoch = 1;
+  bytes wrapped = 2; // crypto_box_seal(space_key[epoch], member.box_pk)
+}
+
+message SpaceInfo {
+  string space_id = 1;
+  SpaceKind kind = 2;
+  SpaceRole role = 3;          // caller's role
+  uint32 epoch = 4;            // current key epoch
+  repeated SpaceKey keys = 5;  // all epochs wrapped for the caller
+  bytes meta = 6;              // encrypted space metadata (see protocol.md), may be empty
+  uint32 meta_epoch = 7;
+  repeated Member members = 8;
+}
+
+message Member {
+  bytes sign_pk = 1;
+  bytes box_pk = 2;
+  SpaceRole role = 3;
+}
+
+message DocHead {
+  string doc_id = 1;
+  uint64 latest_seq = 2;     // 0 = no updates ever
+  uint64 snapshot_seq = 3;   // base_seq of latest snapshot, 0 = none
+}
+
+message Update {
+  uint64 seq = 1;
+  uint32 epoch = 2;
+  bytes author = 3;   // author sign_pk
+  bytes payload = 4;  // nonce(24) ‖ xchacha20poly1305 ciphertext
+  bytes sig = 5;      // ed25519 over sigInput("update", …)
+}
+
+// ───────────────────────── client → server ─────────────────────────
+
+message ClientFrame {
+  oneof msg {
+    Hello hello = 1;
+    Auth auth = 2;
+    ListSpaces list_spaces = 3;
+    CreateSpace create_space = 4;
+    SubscribeSpace subscribe_space = 5;
+    UnsubscribeSpace unsubscribe_space = 6;
+    Subscribe subscribe = 7;
+    Unsubscribe unsubscribe = 8;
+    PushUpdate push_update = 9;
+    PutSnapshot put_snapshot = 10;
+    AwarenessIn awareness = 11;
+    Ping ping = 12;
+  }
+}
+
+message Hello {
+  bytes sign_pk = 1;
+  string device_id = 2;
+  uint32 protocol_version = 3;
+  string client_version = 4;
+}
+
+message Auth {
+  bytes sig = 1; // ed25519 over sigInput("auth", server_id, nonce, sign_pk, device_id)
+}
+
+message ListSpaces { uint32 rid = 1; }
+
+message CreateSpace {
+  uint32 rid = 1;
+  string space_id = 2;     // client-generated, 16 random bytes base64url (no padding)
+  SpaceKind kind = 3;
+  bytes wrapped_key = 4;   // epoch-0 key sealed to the creator's box_pk
+  bytes meta = 5;          // encrypted metadata at epoch 0
+}
+
+message SubscribeSpace { string space_id = 1; }
+message UnsubscribeSpace { string space_id = 1; }
+
+message Subscribe {
+  string space_id = 1;
+  string doc_id = 2;
+  uint64 since_seq = 3; // highest seq the client already has; 0 = nothing
+}
+
+message Unsubscribe {
+  string space_id = 1;
+  string doc_id = 2;
+}
+
+message PushUpdate {
+  uint32 ref = 1;
+  string space_id = 2;
+  string doc_id = 3;
+  uint32 epoch = 4;
+  bytes payload = 5;
+  bytes sig = 6;
+}
+
+message PutSnapshot {
+  uint32 ref = 1;
+  string space_id = 2;
+  string doc_id = 3;
+  uint64 base_seq = 4;
+  uint32 epoch = 5;
+  bytes payload = 6;
+  bytes sig = 7; // over sigInput("snapshot", space, doc, base_seq, epoch, payload)
+}
+
+message AwarenessIn {
+  string space_id = 1;
+  string doc_id = 2;
+  uint32 epoch = 3;
+  bytes payload = 4;
+}
+
+message Ping { uint64 t = 1; }
+
+// ───────────────────────── server → client ─────────────────────────
+
+message ServerFrame {
+  oneof msg {
+    Challenge challenge = 1;
+    AuthOk auth_ok = 2;
+    SpaceList space_list = 3;
+    SpaceCreated space_created = 4;
+    DocHeads doc_heads = 5;
+    Snapshot snapshot = 6;
+    Updates updates = 7;
+    SyncDone sync_done = 8;
+    Ack ack = 9;
+    SnapshotAck snapshot_ack = 10;
+    AwarenessOut awareness = 11;
+    Error error = 12;
+    Pong pong = 13;
+  }
+}
+
+message Challenge {
+  bytes nonce = 1;          // 32 random bytes
+  string server_id = 2;
+  uint32 protocol_version = 3;
+}
+
+message AuthOk {
+  bytes sign_pk = 1;
+  bytes box_pk = 2;
+  HostRole role = 3;
+}
+
+message SpaceList {
+  uint32 rid = 1;
+  repeated SpaceInfo spaces = 2;
+}
+
+message SpaceCreated {
+  uint32 rid = 1;
+  SpaceInfo space = 2;
+}
+
+// Sent after SubscribeSpace (full=true, every doc in the space), and afterwards whenever
+// a doc in a subscribed space advances (full=false, only changed docs).
+message DocHeads {
+  string space_id = 1;
+  bool full = 2;
+  repeated DocHead heads = 3;
+}
+
+message Snapshot {
+  string space_id = 1;
+  string doc_id = 2;
+  uint64 base_seq = 3;
+  uint32 epoch = 4;
+  bytes author = 5;
+  bytes payload = 6;
+  bytes sig = 7;
+}
+
+message Updates {
+  string space_id = 1;
+  string doc_id = 2;
+  repeated Update updates = 3;
+}
+
+message SyncDone {
+  string space_id = 1;
+  string doc_id = 2;
+  uint64 latest_seq = 3;
+  uint32 updates_since_snapshot = 4;
+  uint64 bytes_since_snapshot = 5;
+}
+
+message Ack {
+  uint32 ref = 1;
+  string space_id = 2;
+  string doc_id = 3;
+  uint64 seq = 4;
+}
+
+message SnapshotAck {
+  uint32 ref = 1;
+  string space_id = 2;
+  string doc_id = 3;
+  uint64 base_seq = 4;
+}
+
+message AwarenessOut {
+  string space_id = 1;
+  string doc_id = 2;
+  uint32 epoch = 3;
+  bytes from = 4;        // sender sign_pk (server-stamped from the authenticated session)
+  string device_id = 5;
+  bytes payload = 6;
+}
+
+message Error {
+  uint32 rid = 1;  // rid or ref of the failed request, 0 if not request-scoped
+  ErrorCode code = 2;
+  string message = 3;
+  string space_id = 4;
+  string doc_id = 5;
+}
+
+message Pong { uint64 t = 1; }
