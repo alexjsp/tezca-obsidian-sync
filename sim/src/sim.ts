@@ -18,7 +18,8 @@ import "fake-indexeddb/auto";
 import { HostConnection, type WSCtor, type WSLike } from "../../plugin/src/core/connection";
 import { bytesFingerprint, identityFromSeed, initCrypto, randomBytes, type Identity } from "../../plugin/src/core/crypto";
 import { SyncEngine } from "../../plugin/src/core/engine";
-import { textOf } from "../../plugin/src/core/mirror";
+import { contentModel, textOf } from "../../plugin/src/core/mirror";
+import { formatCanvas, parseCanvas } from "../../plugin/src/core/canvas";
 import { HostApi, createRootSpace, fetchHttp, waitOnline, type HttpFn } from "../../plugin/src/core/setup";
 import { MemoryStore } from "../../plugin/src/core/store";
 import { log } from "../../plugin/src/core/util";
@@ -32,6 +33,7 @@ const arg = (name: string, def: number) => {
 };
 const VERBOSE = args.includes("--verbose");
 const NO_BLOBS = args.includes("--no-blobs");
+const NO_CANVAS = args.includes("--no-canvas");
 /** Two users (C0,C1 = user 0; C2,C3 = user 1). User 0 shares folder "s"; user 1 mounts it at "s". */
 const SHARES = args.includes("--shares");
 log.level = VERBOSE ? "info" : "error";
@@ -186,6 +188,19 @@ const deletedLineages = new Set<string>();
 /** Fingerprint → op that wrote it, for every attachment version written. */
 const blobsWritten = new Map<string, string>();
 
+/** Canvas card tokens: every card id added must survive unless its canvas was deleted. */
+const canvasTokens = new Map<string, string>(); // card id → canvas lineage
+
+function canvasLineage(text: string | Uint8Array | undefined): string | null {
+	if (typeof text !== "string") return null;
+	try {
+		const l = parseCanvas(text).extra.lineage;
+		return typeof l === "string" ? l : null;
+	} catch {
+		return null;
+	}
+}
+
 function lineageOf(text: string | null | undefined): string | null {
 	const m = text?.match(/^lineage:(\w+)/);
 	return m ? m[1] : null;
@@ -197,6 +212,7 @@ async function run(seed: number, nClients: number, steps: number, bin: string): 
 	tokenInfo.clear();
 	deletedLineages.clear();
 	blobsWritten.clear();
+	canvasTokens.clear();
 	const rnd = mulberry32(seed);
 	const pick = <T>(xs: T[]): T => xs[Math.floor(rnd() * xs.length)];
 	const server = await startServer(bin);
@@ -255,8 +271,34 @@ async function run(seed: number, nClients: number, steps: number, bin: string): 
 			const r = rnd();
 			let op = "";
 			try {
-				const bins = NO_BLOBS ? [] : binFiles(c);
-				if (!NO_BLOBS && r >= 0.12 && r < 0.17) {
+				const bins = NO_BLOBS ? [] : binFiles(c).filter((p) => !p.endsWith(".canvas"));
+				const canvases = NO_CANVAS ? [] : [...c.vault.files.keys()].filter((p) => p.endsWith(".canvas") && !p.includes("(conflict"));
+				if (!NO_CANVAS && r >= 0.88 && r < 0.9) {
+					// Create a canvas, or add a card to one / move a card.
+					if (!canvases.length || rnd() < 0.3) {
+						const p = `${pick(folders)}board-${Math.floor(rnd() * 8)}.canvas`;
+						if (c.vault.files.has(p)) continue;
+						const t = `c${tok++}`;
+						canvasTokens.set(t, `C${seed}x${step}`);
+						await c.vault.userWrite(p, formatCanvas({ nodes: [{ id: t, type: "text", text: t, x: 0, y: 0, width: 100, height: 50 }], edges: [], extra: { lineage: `C${seed}x${step}` } }));
+						op = `create canvas ${p}`;
+					} else {
+						const p = pick(canvases);
+						const cur = parseCanvas(c.vault.files.get(p) as string);
+						if (rnd() < 0.6 || !cur.nodes.length) {
+							const t = `c${tok++}`;
+							const lin = typeof cur.extra.lineage === "string" ? cur.extra.lineage : null;
+							if (lin) canvasTokens.set(t, lin);
+							cur.nodes.push({ id: t, type: "text", text: t, x: step, y: 0, width: 100, height: 50 });
+							op = `add card ${t} to ${p}`;
+						} else {
+							const n = pick(cur.nodes);
+							n.x = step;
+							op = `move card ${n.id} in ${p}`;
+						}
+						await c.vault.userWrite(p, formatCanvas(cur));
+					}
+				} else if (!NO_BLOBS && r >= 0.12 && r < 0.17) {
 					const p = `${pick(folders)}img-${Math.floor(rnd() * 15)}.bin`;
 					if (c.vault.files.has(p)) continue;
 					await c.vault.userWriteBinary(p, randomBlob(`${step} ${c.name}: create ${p}`));
@@ -426,12 +468,13 @@ async function run(seed: number, nClients: number, steps: number, bin: string): 
 		for (const c of clients) {
 			for (const { mirror, space: sp, prefix } of spacesOf(c)) {
 				for (const e of mirror.index.live()) {
-					if (e.kind !== "md") continue;
+					if (e.kind !== "md" && e.kind !== "canvas") continue;
 					const doc = await sp.acquire(e.id);
-					const crdt = textOf(doc).toString();
+					const model = contentModel(e.kind);
+					const crdt = model.read(doc);
 					sp.release(e.id);
 					const disk = c.vault.files.get(prefix + e.path);
-					if (disk !== crdt) problems.push(`${c.name}: ${prefix + e.path} disk≠crdt (disk ${JSON.stringify(disk?.slice(0, 60))}, crdt ${JSON.stringify(crdt.slice(0, 60))})`);
+					if (typeof disk !== "string" || !model.same(disk, crdt)) problems.push(`${c.name}: ${prefix + e.path} disk≠crdt (disk ${JSON.stringify(disk?.slice(0, 60))}, crdt ${JSON.stringify(crdt.slice(0, 60))})`);
 				}
 			}
 		}
@@ -446,6 +489,10 @@ async function run(seed: number, nClients: number, steps: number, bin: string): 
 			}
 		}
 		if (lost > 10) problems.push(`… ${lost} tokens lost in total`);
+		for (const [t, lin] of canvasTokens) {
+			if (deletedLineages.has(lin) || union.includes(`"id":"${t}"`)) continue;
+			problems.push(`canvas card ${t} (canvas ${lin}) lost`);
+		}
 		if (lost) {
 			const lostLins = new Set([...tokens].filter(([t, l]) => !deletedLineages.has(l) && !new RegExp(`(^|\\n)${t}(\\n|$)`).test(union)).map(([, l]) => l));
 			const c = clients[0];
