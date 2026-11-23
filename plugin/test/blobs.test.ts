@@ -174,7 +174,7 @@ describe("blob sync", () => {
 		const { host, a, b } = await pair({ "n.md": "x" });
 		host.maxBlobBytes = 1000;
 		// The engine reads the limit at start; simulate the host having said so.
-		(a.engine as unknown as { maxBlobBytes: number }).maxBlobBytes = 1000;
+		a.engine.primary.maxBlobBytes = 1000;
 		const notices: string[] = [];
 		a.engine.notices.on((n) => notices.push(n.message));
 		await a.vault.userWriteBinary("huge.mov", big(5000));

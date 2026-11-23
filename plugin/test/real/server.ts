@@ -132,3 +132,21 @@ export async function startDevice(server: RealServer, user: User, name: string, 
 	await engine.start();
 	return { user, name, vault, store, engine };
 }
+
+/**
+ * Someone with no host of their own: joins a share on `server` as a guest and keeps their mount
+ * table in a profile space there. Returns the user (rootSpaceId = the profile space).
+ */
+export async function hostlessGuest(server: RealServer, name: string, inviteLink: string): Promise<User> {
+	const { ShareApi, createSpace } = await import("../../src/core/setup");
+	const { SpaceKind } = await import("../../src/proto/tezca/v1/sync_pb");
+	const id = identityFromSeed(randomBytes(32));
+	const u = new URL(inviteLink.replace("obsidian://tezca", "http://x/"));
+	await new ShareApi(new HostApi(server.url), id).redeemAsGuest(u.searchParams.get("token")!);
+	const conn = new HostConnection({ host: server.url, identity: id, deviceId: "setup", clientVersion: "test", WebSocketImpl: NodeWS });
+	conn.start();
+	await waitOnline(conn);
+	const profile = await createSpace(conn, id, `${name}'s profile`, SpaceKind.PROFILE);
+	conn.stop();
+	return { name, id, rootSpaceId: profile.spaceId };
+}

@@ -6,6 +6,8 @@ export interface Mount {
 	spaceId: string;
 	/** Vault folder path. */
 	path: string;
+	/** Host of a share that isn't on the root/profile space's host (normalized URL). */
+	host?: string;
 }
 
 export class Mounts {
@@ -19,8 +21,8 @@ export class Mounts {
 		const out: Mount[] = [];
 		this.map.forEach((v, spaceId) => {
 			try {
-				const { path } = JSON.parse(v) as { path: string };
-				if (typeof path === "string" && path) out.push({ spaceId, path });
+				const { path, host } = JSON.parse(v) as { path: string; host?: string };
+				if (typeof path === "string" && path) out.push({ spaceId, path, ...(typeof host === "string" && host ? { host } : {}) });
 			} catch {
 				/* ignore malformed */
 			}
@@ -32,9 +34,11 @@ export class Mounts {
 		return this.all().find((m) => m.spaceId === spaceId);
 	}
 
-	set(spaceId: string, path: string, origin?: unknown): void {
-		if (this.get(spaceId)?.path === path) return;
-		this.ydoc.transact(() => this.map.set(spaceId, JSON.stringify({ path })), origin);
+	set(spaceId: string, path: string, origin?: unknown, host?: string): void {
+		const cur = this.get(spaceId);
+		const h = host ?? cur?.host;
+		if (cur?.path === path && cur?.host === h) return;
+		this.ydoc.transact(() => this.map.set(spaceId, JSON.stringify(h ? { path, host: h } : { path })), origin);
 	}
 
 	remove(spaceId: string, origin?: unknown): void {

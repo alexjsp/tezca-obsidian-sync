@@ -58,17 +58,26 @@ export class TezcaSettingTab extends PluginSettingTab {
 
 			containerEl.createEl("h3", { text: "Shared folders" });
 			const mounts = p.engine?.mounts?.all() ?? [];
+			if (p.engine?.isProfile)
+				containerEl.createEl("p", {
+					cls: "setting-item-description",
+					text: "You're using Tezca as a guest: only shared folders sync, and the rest of this vault stays on this device.",
+				});
 			if (!mounts.length)
 				containerEl.createEl("p", {
 					cls: "setting-item-description",
-					text: "None yet. Right-click a folder and choose \"Share folder…\" to share it with someone on this host.",
+					text: "None yet. Right-click a folder and choose \"Share folder…\" to share it with someone, or open an invite link to join one.",
 				});
 			for (const m of mounts) {
 				const sh = p.engine?.shares.get(m.spaceId);
 				const role = p.engine?.roleIn(m.spaceId);
 				new Setting(containerEl)
 					.setName(m.path)
-					.setDesc(sh ? `${sh.space.meta?.name ?? ""}${role ? ` · you're ${role === "owner" ? "an owner" : `a${role === "editor" ? "n editor" : " viewer"}`}` : ""}` : "Connecting…")
+					.setDesc(
+						sh
+							? `${sh.space.meta?.name ?? ""}${role ? ` · you're ${role === "owner" ? "an owner" : `a${role === "editor" ? "n editor" : " viewer"}`}` : ""}${m.host ? ` · on ${m.host}` : ""}`
+							: `Connecting…${m.host ? ` (${m.host})` : ""}`,
+					)
 					.addButton((b) =>
 						b
 							.setButtonText("Manage")

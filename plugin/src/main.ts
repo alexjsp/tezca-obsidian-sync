@@ -14,7 +14,7 @@ import {
 	type Identity,
 } from "./core/crypto";
 import { SyncEngine, type EngineStatus } from "./core/engine";
-import { HostApi, createRootSpace, httpResponse, listSpaces, normalizeHost, parseDeepLink, waitOnline, type HttpFn } from "./core/setup";
+import { HostApi, ShareApi, createRootSpace, createSpace, httpResponse, listSpaces, normalizeHost, parseDeepLink, waitOnline, type HttpFn } from "./core/setup";
 import { SpaceSync } from "./core/space";
 import { IdbStore } from "./core/store";
 import { log } from "./core/util";
@@ -164,7 +164,7 @@ export default class TezcaPlugin extends Plugin {
 							.setIcon("users")
 							.onClick(() => new ShareModal(this.app, engine, mount.spaceId).open()),
 					);
-				} else if (!engine.mounts?.containing(file.path) && !engine.mounts?.all().some((m) => m.path.startsWith(file.path + "/"))) {
+				} else if (!engine.isProfile && !engine.mounts?.containing(file.path) && !engine.mounts?.all().some((m) => m.path.startsWith(file.path + "/"))) {
 					menu.addItem((item) =>
 						item
 							.setTitle("Share folder…")
@@ -368,20 +368,59 @@ export default class TezcaPlugin extends Plugin {
 	}
 
 	async joinShare(host: string, token: string, secret: string) {
+		host = normalizeHost(host);
+		if (!this.isConfigured) return this.joinShareAsNewGuest(host, token, secret);
 		const engine = this.engine;
-		if (!engine) throw new Error("Set up Tezca on this vault before joining a shared folder.");
-		if (normalizeHost(host) !== normalizeHost(this.settings.host))
-			throw new Error("This invite is for a different host. Shared folders across hosts are coming in a later version.");
-		const path = await engine.joinShare(token, secret, async (shareName) => {
-			let suggestion = shareName;
-			for (let i = 2; this.app.vault.getAbstractFileByPath(suggestion); i++) suggestion = `${shareName} ${i}`;
-			const v = await form(this.app, `Join "${shareName}"`, "Choose the folder in your vault where this shared folder will live.", [
-				{ key: "path", name: "Folder", value: suggestion },
-			], "Join");
-			const p = v?.path.trim().replace(/^\/+|\/+$/g, "");
-			return p ? p : null;
-		});
+		if (!engine) throw new Error("Tezca isn't running. Check its settings, then open the invite link again.");
+		const path = await engine.joinShare(token, secret, (n) => this.askMountPath(n), host);
 		if (path) new Notice(`Joined. The shared folder is at "${path}".`);
+	}
+
+	/**
+	 * Someone without Tezca set up opens an invite: they join that host as a guest. Only shared
+	 * folders sync; their own notes stay on this device. Their mount list lives in a profile space.
+	 */
+	private async joinShareAsNewGuest(host: string, token: string, secret: string) {
+		const ok = await confirm(
+			this.app,
+			"Join a shared folder",
+			`You've been invited to a shared folder on ${host}. You'll join that host as a guest: only shared folders sync, and the rest of this vault stays on this device. You can add a host of your own later.`,
+			"Join",
+		);
+		if (!ok) return;
+		const id = newIdentity();
+		await new ShareApi(this.api(host), id).redeemAsGuest(token);
+		await new Promise<void>((resolve) => new RecoveryPhraseModal(this.app, recoveryPhrase(id.seed), resolve).open());
+		const conn = new HostConnection({ host, identity: id, deviceId: this.settings.deviceId, clientVersion: this.manifest.version });
+		conn.start();
+		try {
+			await waitOnline(conn);
+			const profile = await createSpace(conn, id, this.settings.displayName || this.app.vault.getName(), SpaceKind.PROFILE);
+			await this.stopEngine();
+			await this.saveIdentity(id);
+			this.settings.host = host;
+			this.settings.spaceId = profile.spaceId;
+			this.settings.hostRole = "guest";
+			await this.saveSettings();
+		} finally {
+			conn.stop();
+		}
+		await this.startEngine();
+		this.settingTab.display();
+		const engine = this.engine;
+		if (!engine) return;
+		const path = await engine.joinShare(token, secret, (n) => this.askMountPath(n), host);
+		if (path) new Notice(`Joined. The shared folder is at "${path}".`);
+	}
+
+	private async askMountPath(shareName: string): Promise<string | null> {
+		let suggestion = shareName;
+		for (let i = 2; this.app.vault.getAbstractFileByPath(suggestion); i++) suggestion = `${shareName} ${i}`;
+		const v = await form(this.app, `Join "${shareName}"`, "Choose the folder in your vault where this shared folder will live.", [
+			{ key: "path", name: "Folder", value: suggestion },
+		], "Join");
+		const p = v?.path.trim().replace(/^\/+|\/+$/g, "");
+		return p ? p : null;
 	}
 
 	// ───────────── setup flows ─────────────

@@ -133,7 +133,7 @@ function snap(c: SimClient): [string, string][] {
 /** Every mounted space of a client: its mirror, space, and the vault prefix of its paths. */
 function spacesOf(c: SimClient) {
 	const e = c.engine!;
-	return [e.root!, ...e.shares.values()].map((m) => ({ mirror: m.mirror, space: m.space, prefix: m.mount ? m.mount + "/" : "" }));
+	return [...(e.root?.mirror ? [e.root] : []), ...e.shares.values()].map((m) => ({ mirror: m.mirror!, space: m.space, prefix: m.mount ? m.mount + "/" : "" }));
 }
 
 /** Which other clients a path must match on: the same user's devices, plus everyone for shared paths. */

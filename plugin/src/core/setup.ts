@@ -101,6 +101,11 @@ export class HostApi {
 		return res.json as T;
 	}
 
+	/** An unsigned JSON request. */
+	unsigned<T = unknown>(method: string, path: string, body?: unknown): Promise<T> {
+		return this.call<T>(method, path, body);
+	}
+
 	/** A signed JSON request (any method). */
 	signed<T = unknown>(method: string, path: string, identity: Identity, body?: unknown): Promise<T> {
 		return this.call<T>(method, path, body, identity);
@@ -196,6 +201,15 @@ export class ShareApi {
 
 	redeem(token: string): Promise<RedeemedShare> {
 		return this.api.signed("POST", "/api/share-invites/redeem", this.identity, { token });
+	}
+
+	/** Redeem without being a user of this host yet: becomes a guest (protocol.md "Guests"). */
+	async redeemAsGuest(token: string): Promise<RedeemedShare> {
+		const info = await this.api.info();
+		const id = this.identity;
+		const sig = sign(id, sigMsg.redeem(info.server_id, token, id.signPk, id.boxPk));
+		// No Authorization header: the key isn't a user here yet; the body signature proves it.
+		return this.api.unsigned("POST", "/api/share-invites/redeem", { token, sign_pk: b64u(id.signPk), box_pk: b64u(id.boxPk), sig: b64u(sig) });
 	}
 
 	putKeys(spaceId: string, keys: { epoch: number; wrapped: Uint8Array }[]) {
