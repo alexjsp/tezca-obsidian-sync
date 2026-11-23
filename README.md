@@ -6,9 +6,11 @@ Self-hosted, live, end-to-end encrypted sync for Obsidian, with real-time collab
 
 - **Live:** keystroke-level sync via Yjs CRDTs. Cursors of your other devices show up in open notes.
 - **End-to-end encrypted:** the host stores and relays ciphertext only. It never sees paths, content or cursors.
-- **Self-hosted:** a single small Go binary / Docker container with SQLite. Nothing else to run.
+- **Attachments:** images, PDFs and every other file sync too, encrypted, with earlier versions kept.
+- **History:** notes keep hourly and daily versions on the host; restore any version, or bring back deleted files.
+- **Self-hosted:** a single small Go binary / Docker container with SQLite (attachments on disk or any S3-compatible store). Nothing else to run.
 
-Status: **M1 (personal live sync)**. See [docs/plan.md](docs/plan.md).
+Status: **M2 (attachments and history)**. See [docs/plan.md](docs/plan.md).
 
 ## Repository
 
