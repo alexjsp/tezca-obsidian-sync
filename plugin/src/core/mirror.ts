@@ -45,6 +45,8 @@ export interface MirrorOptions {
 	retryMs?: number;
 	/** Vault folders this mirror must leave alone (the root space skips share mounts). */
 	excluded?: () => string[];
+	/** Sync some files from the vault's config folder (root space only); see config-sync.ts. */
+	config?: { dir: string; file: (rel: string) => boolean; folder: (rel: string) => boolean };
 }
 
 /** Default blob size cap when the host doesn't say. */
@@ -60,7 +62,7 @@ export function fileKind(path: string): "md" | "canvas" | "blob" {
 }
 
 export interface MirrorNotice {
-	kind: "conflict" | "brake" | "preserved" | "error";
+	kind: "conflict" | "brake" | "preserved" | "error" | "config";
 	message: string;
 	paths?: string[];
 }
@@ -180,6 +182,14 @@ export class DiskMirror {
 	inScope(vaultPath: string, kind: "file" | "folder"): boolean {
 		const rel = this.toRel(vaultPath);
 		if (rel === null || rel === "") return false;
+		const cfg = this.opts.config;
+		if (cfg && (rel === cfg.dir || rel.startsWith(cfg.dir + "/"))) {
+			if (this.localOnly.has(vaultPath)) return false;
+			if (rel === cfg.dir) return kind === "folder";
+			const inner = rel.slice(cfg.dir.length + 1);
+			if (inner.split("/").some((seg) => seg.startsWith("."))) return false;
+			return kind === "file" ? cfg.file(inner) : cfg.folder(inner);
+		}
 		if (rel.split("/").some((seg) => seg.startsWith("."))) return false;
 		if (this.localOnly.has(vaultPath)) return false;
 		if (this.opts.excluded?.().some((m) => vaultPath === m || vaultPath.startsWith(m + "/"))) return false;
@@ -1324,6 +1334,9 @@ export class DiskMirror {
 		if (!bytes) return this.startDownload(e.id, C);
 		await this.selfWriteBinary(this.toVault(e.path), bytes, expected);
 		this.setBlobBaseline(e.id, e.path, C.hash);
+		const cfg = this.opts.config;
+		if (cfg && e.path.startsWith(cfg.dir + "/"))
+			this.notices.emit({ kind: "config", message: `Settings changed on another device (${e.path.slice(cfg.dir.length + 1)}). Reload Obsidian to apply them.`, paths: [e.path] });
 	}
 
 	/** Record a local version once uploaded, or start its upload. */

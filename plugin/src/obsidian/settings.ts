@@ -86,6 +86,32 @@ export class TezcaSettingTab extends PluginSettingTab {
 					);
 			}
 
+			if (!p.engine?.isProfile) {
+				containerEl.createEl("h3", { text: "Settings sync" });
+				containerEl.createEl("p", {
+					cls: "setting-item-description",
+					text: "Sync parts of this vault's Obsidian settings (.obsidian) through your private vault. Choose per device; changes from other devices apply after reloading Obsidian. Workspace layout and Tezca's own settings never sync.",
+				});
+				const cats: [keyof typeof p.settings.configSync, string, string][] = [
+					["core", "Core settings", "Editor and app options, core plugins and their settings (daily notes, templates, …)."],
+					["appearance", "Appearance", "Theme choice, themes and CSS snippets."],
+					["hotkeys", "Hotkeys", "Custom keyboard shortcuts."],
+					["plugins", "Community plugin list and settings", "Which community plugins are enabled, and each plugin's settings."],
+					["pluginCode", "Community plugin code", "The plugins themselves, so a plugin installed on one device appears on the others."],
+				];
+				for (const [key, name, desc] of cats)
+					new Setting(containerEl)
+						.setName(name)
+						.setDesc(desc)
+						.addToggle((t) =>
+							t.setValue(p.settings.configSync[key]).onChange(async (v) => {
+								p.settings.configSync[key] = v;
+								await p.saveSettings();
+								await p.startEngine(); // re-scan with the new selection
+							}),
+						);
+			}
+
 			containerEl.createEl("h3", { text: "Presence" });
 			new Setting(containerEl)
 				.setName("Display name")

@@ -13,6 +13,7 @@ import {
 	hex,
 	type Identity,
 } from "./core/crypto";
+import { NO_CONFIG, anyConfig, type ConfigCategories } from "./core/config-sync";
 import { SyncEngine, type EngineStatus } from "./core/engine";
 import { HostApi, ShareApi, createRootSpace, createSpace, httpResponse, listSpaces, normalizeHost, parseDeepLink, waitOnline, type HttpFn } from "./core/setup";
 import { SpaceSync } from "./core/space";
@@ -35,6 +36,8 @@ export interface TezcaSettings {
 	color: string;
 	hostRole: string;
 	debug: boolean;
+	/** Which parts of the config folder sync from this device (all off by default). */
+	configSync: ConfigCategories;
 }
 
 const DEFAULT_SETTINGS: TezcaSettings = {
@@ -46,6 +49,7 @@ const DEFAULT_SETTINGS: TezcaSettings = {
 	color: "",
 	hostRole: "",
 	debug: false,
+	configSync: { ...NO_CONFIG },
 };
 
 /** Monochrome take on assets/icon.svg (an obsidian mirror) for Obsidian's 100×100 icon grid. */
@@ -191,6 +195,7 @@ export default class TezcaPlugin extends Plugin {
 
 	async loadSettings() {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		this.settings.configSync = { ...NO_CONFIG, ...(this.settings.configSync ?? {}) };
 		let dirty = false;
 		if (!this.settings.deviceId) {
 			this.settings.deviceId = b64u(randomBytes(12));
@@ -249,18 +254,29 @@ export default class TezcaPlugin extends Plugin {
 			deviceName: this.settings.deviceName,
 			spaceId: this.settings.spaceId,
 			store: this.vaultStore,
-			vault: new ObsidianVault(this.app),
+			vault: new ObsidianVault(this.app, anyConfig(this.settings.configSync)),
 			clientVersion: this.manifest.version,
 			isBound: (p) => this.editors.isBound(p),
 			http: obsidianHttp,
 			profile: () => ({ name: this.settings.displayName || this.settings.deviceName, color: this.settings.color }),
+			config: { dir: this.app.vault.configDir, categories: this.settings.configSync, ownPluginId: this.manifest.id },
 		});
 		this.engine = engine;
 		engine.status.on((s) => {
 			this.lastStatus = s;
 			this.renderStatus();
 		});
-		engine.notices.on((n) => new Notice(`Tezca: ${n.message}`, n.kind === "brake" ? 0 : 8000));
+		let lastConfigNotice = 0;
+		engine.notices.on((n) => {
+			if (n.kind === "config") {
+				// One reminder per burst of settings changes.
+				if (Date.now() - lastConfigNotice < 60_000) return;
+				lastConfigNotice = Date.now();
+				new Notice("Tezca: settings changed on another device. Reload Obsidian to apply them.", 10000);
+				return;
+			}
+			new Notice(`Tezca: ${n.message}`, n.kind === "brake" ? 0 : 8000);
+		});
 		engine.conn.statusChanged.on((s) => {
 			if (s === "unauthorized") new Notice("Tezca: the host rejected this device's identity.", 10000);
 			if (s === "update-required") new Notice("Tezca: the host runs a different protocol version. Update the plugin or the server.", 10000);

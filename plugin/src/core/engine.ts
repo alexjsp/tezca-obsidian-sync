@@ -5,6 +5,7 @@ import { SpaceInfoSchema, SpaceKind, SpaceRole, type SpaceInfo } from "../proto/
 import { BlobClient } from "./blobs";
 import { HostConnection, type ConnStatus, type WSCtor } from "./connection";
 import { fromB64u, newSpaceKey, randomBytes, unwrapInvite, wrapForInvite, wrapKey, b64u, type Identity } from "./crypto";
+import { anyConfig, configFileIncluded, configFolderIncluded, type ConfigCategories } from "./config-sync";
 import { DEFAULT_MAX_BLOB_BYTES, DiskMirror, LOCAL_ORIGIN, type MirrorNotice } from "./mirror";
 import { Mounts, within, type Mount } from "./mounts";
 import { HostApi, ShareApi, createSpace, fetchHttp, listSpaces, normalizeHost, waitOnline, type HttpFn, type ShareRole } from "./setup";
@@ -34,6 +35,8 @@ export interface EngineOptions {
 	blobRetryMs?: number;
 	/** Display name and cursor colour other members of a share see. */
 	profile?: () => { name: string; color: string };
+	/** Config-folder sync (private space only): which categories, the folder, and our own plugin id. */
+	config?: { dir: string; categories: ConfigCategories; ownPluginId: string };
 }
 
 export interface EngineStatus {
@@ -185,7 +188,7 @@ export class SyncEngine {
 		await space.start();
 		this.mounts = new Mounts(space.index.ydoc);
 		const profile = info.kind === SpaceKind.PROFILE;
-		const mirror = profile ? null : this.newMirror(p, space, "", () => this.mounts!.all().map((m) => m.path));
+		const mirror = profile ? null : this.newMirror(p, space, "", () => this.mounts!.all().map((m) => m.path), this.configScope());
 		this.root = { spaceId, host: p.host, mount: "", space, mirror };
 		// Now that root exists, wire every link (the primary and any made so far).
 		for (const l of this.hosts.values()) {
@@ -209,8 +212,19 @@ export class SyncEngine {
 		this.emitStatus();
 	}
 
-	private newMirror(l: HostLink, space: SpaceSync, mount: string, excluded?: () => string[]): DiskMirror {
+	private configScope() {
+		const c = this.opts.config;
+		if (!c || !anyConfig(c.categories)) return undefined;
+		return {
+			dir: c.dir,
+			file: (rel: string) => configFileIncluded(rel, c.categories, c.ownPluginId),
+			folder: (rel: string) => configFolderIncluded(rel, c.categories, c.ownPluginId),
+		};
+	}
+
+	private newMirror(l: HostLink, space: SpaceSync, mount: string, excluded?: () => string[], config?: DiskMirror["opts"]["config"]): DiskMirror {
 		const mirror = new DiskMirror(space, this.opts.vault, {
+			config,
 			mount,
 			deviceName: this.opts.deviceName,
 			isBound: this.opts.isBound,
