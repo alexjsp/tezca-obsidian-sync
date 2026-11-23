@@ -361,8 +361,12 @@ they're already a user), and mounts it with `host` set.
 ## Index document (client-defined, opaque to the server)
 
 The `index` doc of a space is a `Y.Map` named `files`: `file_id → Y.Map` with `path` (space-relative),
-`kind` (`md` | `folder` | `blob`), `deleted`, `ctime`, `mtime`. A `md` entry's content is the doc
-`file_id`. A `blob` entry also has `blob` = JSON `{id, epoch, size, hash}` (`hash` is an unkeyed
+`kind` (`md` | `canvas` | `folder` | `blob`), `deleted`, `ctime`, `mtime`. A `md` entry's content is the
+doc `file_id` (`Y.Text` "content"). A `canvas` entry's content is the doc `file_id` too, as a `Y.Map`
+"canvas" holding `nodes` and `edges` (`Y.Map` of id → `Y.Map` of fields, card text as `Y.Text`),
+`nodeOrder`/`edgeOrder` (`Y.Array` of ids) and `extra` (other top-level JSON keys). Clients that don't know a
+kind ignore the entry. Files under the vault's config folder (`.obsidian/…`) appear only in a root space,
+as `blob` entries, for the categories each device opted into. A `blob` entry also has `blob` = JSON `{id, epoch, size, hash}` (`hash` is an unkeyed
 BLAKE2b-128 hex of the plaintext, for local change detection) or is absent while the first upload is
 pending, and `prev` = JSON array of up to 20 earlier `blob` values (newest first), its version history.
 
