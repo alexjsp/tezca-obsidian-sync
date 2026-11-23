@@ -6,9 +6,13 @@ import { yCollab, ySyncAnnotation } from "y-codemirror.next";
 import type { DocSync } from "../core/doc-sync";
 import { textOf } from "../core/mirror";
 import type { SyncEngine } from "../core/engine";
-import { log } from "../core/util";
+import { log, sleep } from "../core/util";
 
 const collabCompartment = new Compartment();
+
+/** How long a bind waits for the editor to show its file, and how often it re-checks. */
+const BIND_WAIT_MS = 5000;
+const BIND_POLL_MS = 100;
 
 /** Remote edits must not enter the local undo history. */
 const remoteNotUndoable = EditorState.transactionExtender.of((tr) =>
@@ -52,7 +56,8 @@ export class EditorBindings {
 					update(u: ViewUpdate) {
 						const path = mgr.pathOf(u.view);
 						const b = mgr.bindings.get(u.view);
-						if ((b?.path ?? null) !== path) queueMicrotask(() => mgr.refresh(u.view));
+						// Path changed, or an unbound view (an earlier bind gave up) was edited: try again.
+						if ((b?.path ?? null) !== path || (!b && path !== null && u.docChanged)) queueMicrotask(() => mgr.refresh(u.view));
 					}
 					destroy() {
 						mgr.unbind(this.view, false);
@@ -109,13 +114,34 @@ export class EditorBindings {
 				return this.dropPlaceholder(view, placeholder);
 			}
 			const ytext = textOf(doc);
-			const editorText = view.state.doc.toString();
-			const target = await mirror.reconcileEditorText(docId, path, editorText);
-			if (this.bindings.get(view) !== placeholder) {
-				space.release(docId);
-				return;
+			// Wait until the editor shows this file (its disk or synced text). Until Obsidian has loaded
+			// the file, the view can still hold the previous note's text under the new path; that text
+			// must never reach this doc. Typing before the bind reaches the CRDT via Obsidian's save to disk.
+			const deadline = Date.now() + BIND_WAIT_MS;
+			let shown = false;
+			for (;;) {
+				const { crdt, disk } = await mirror.prepareEditor(docId, path);
+				if (this.bindings.get(view) !== placeholder || this.pathOf(view) !== path) {
+					space.release(docId);
+					return this.dropPlaceholder(view, placeholder);
+				}
+				const ed = view.state.doc.toString();
+				if (ed === normalizeEol(crdt) || (disk !== null && ed === normalizeEol(disk))) {
+					shown = true;
+					break;
+				}
+				if (Date.now() > deadline) break;
+				await sleep(BIND_POLL_MS);
 			}
+			if (!shown) {
+				// Retried on the next edit in this view (see the ViewPlugin) or the next file-open.
+				log.debug(`editor for ${path} does not show its file yet; not binding`);
+				space.release(docId);
+				return this.dropPlaceholder(view, placeholder);
+			}
+			// No awaits from here on: bind against exactly the text just checked.
 			const current = view.state.doc.toString();
+			const target = ytext.toString();
 			if (current !== target) {
 				view.dispatch({ changes: minimalChange(current, target), annotations: Transaction.addToHistory.of(false) });
 			}
@@ -180,4 +206,9 @@ function minimalChange(a: string, b: string) {
 		endB--;
 	}
 	return { from: start, to: endA, insert: b.slice(start, endB) };
+}
+
+/** CodeMirror documents always use "\n"; compare file text the way the editor would hold it. */
+function normalizeEol(s: string): string {
+	return s.includes("\r") ? s.replace(/\r\n?/g, "\n") : s;
 }

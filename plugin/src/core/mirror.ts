@@ -927,32 +927,24 @@ export class DiskMirror {
 	}
 
 	/**
-	 * Called right before binding an editor: decide what text the editor should show and make the
-	 * CRDT agree with it. Editor content normally came from disk, so it is "local input".
+	 * Called right before binding an editor: bring the file on disk and its CRDT into agreement
+	 * (disk is how local edits arrive), and report both texts.
+	 *
+	 * The editor's own text is deliberately NOT an input. Obsidian points a view at a new file before
+	 * it loads that file's text, so at bind time the editor may still show the previous note; merging
+	 * it in once overwrote a note with another note's content. The caller only binds when the editor
+	 * shows one of the texts returned here.
 	 */
-	reconcileEditorText(docId: string, vaultPath: string, editorText: string): Promise<string> {
+	prepareEditor(docId: string, vaultPath: string): Promise<{ crdt: string; disk: string | null }> {
 		return this.enqueue(async () => {
+			try {
+				await this.verifyFile(docId);
+			} catch (e) {
+				if (!(e instanceof DiskChanged)) throw e;
+			}
 			const doc = await this.space.acquire(docId);
 			try {
-				const ytext = textOf(doc);
-				const C = ytext.toString();
-				if (editorText === C) return C;
-				const base = this.state.baselines[docId];
-				if (base && fingerprint(editorText) === base.hash) return C; // editor shows last-synced text
-				if (!base && C === "") {
-					applyTextDiff(ytext, editorText, LOCAL_ORIGIN);
-					return editorText;
-				}
-				const B = await this.baselineText(docId, base);
-				if (B !== null) {
-					const { text, clean } = threeWayMerge(B, editorText, C);
-					if (clean) {
-						applyTextDiff(ytext, text, LOCAL_ORIGIN);
-						return text;
-					}
-				}
-				await this.writeConflictCopy(vaultPath, editorText, "The open note differed from the synced version");
-				return C;
+				return { crdt: textOf(doc).toString(), disk: await this.vault.read(vaultPath) };
 			} finally {
 				this.space.release(docId);
 			}

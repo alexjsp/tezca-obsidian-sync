@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 // Drives a real CodeMirror EditorView through EditorBindings against a running engine.
+import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -75,5 +76,66 @@ describe("editor bindings", () => {
 		mgr.rebindViews([view]);
 		await eventually(() => mgr.isBound("b.md") && !mgr.isBound("a.md"), 5000, "bound to b");
 		expect(counter.calls).toBeLessThan(10);
+	});
+
+	// Regression: Obsidian points a view at the new file before loading its text, so for a moment
+	// the view shows note A's text under note B's path. Binding then must not push A's text into B.
+	it("never merges the previous note's text into a newly opened note", async () => {
+		const { host, id, spaceId } = await setupHost();
+		const vault = new MemoryVault();
+		vault.files.set("a.md", "Sarah wedding notes");
+		vault.files.set("b.md", "Hello from the phone");
+		const a = await startClient(host, id, spaceId, "A", vault);
+		clients.push(a);
+
+		const { mgr } = boundedBindings(a.engine);
+		const extensions = [editorInfoField, mgr.extension()];
+		const view = openView(mgr, "a.md", "Sarah wedding notes");
+		await eventually(() => mgr.isBound("a.md"), 5000, "bound to a");
+
+		// 1. The file switches but the text is still a.md's; workspace file-open fires a rebind.
+		view.dispatch({ effects: setFile.of("b.md") });
+		mgr.rebindViews([view]);
+		await new Promise((r) => setTimeout(r, 300));
+		// 2. Obsidian finishes loading b.md and replaces the editor state (as MarkdownView.setViewData does).
+		view.setState(
+			EditorState.create({ doc: "Hello from the phone", extensions: [...extensions.slice(1), editorInfoField.init(() => ({ file: { path: "b.md" } }))] }),
+		);
+		await eventually(() => mgr.isBound("b.md"), 8000, "bound to b");
+		await a.engine.mirror!.idle();
+
+		const text = async (p: string) => {
+			const docId = a.engine.mirror!.docIdFor(p)!;
+			const doc = await a.engine.space!.acquireSynced(docId, 3000);
+			try {
+				return textOf(doc).toString();
+			} finally {
+				a.engine.space!.release(docId);
+			}
+		};
+		expect(await text("b.md")).toBe("Hello from the phone");
+		expect(await text("a.md")).toBe("Sarah wedding notes");
+		expect(vault.files.get("b.md")).toBe("Hello from the phone");
+		expect(vault.files.get("a.md")).toBe("Sarah wedding notes");
+		expect(view.state.doc.toString()).toBe("Hello from the phone");
+	});
+
+	it("binds after the editor catches up with text typed before the bind", async () => {
+		const { host, id, spaceId } = await setupHost();
+		const vault = new MemoryVault();
+		vault.files.set("n.md", "");
+		const a = await startClient(host, id, spaceId, "A", vault);
+		clients.push(a);
+		const { mgr } = boundedBindings(a.engine);
+		// The user typed before the bind; Obsidian's autosave lands on disk a moment later.
+		const view = openView(mgr, "n.md", "typed early");
+		setTimeout(() => void vault.userWrite("n.md", "typed early"), 400);
+		await eventually(() => mgr.isBound("n.md"), 8000, "bound to n");
+		await a.engine.mirror!.idle();
+		const docId = a.engine.mirror!.docIdFor("n.md")!;
+		const doc = await a.engine.space!.acquireSynced(docId, 3000);
+		expect(textOf(doc).toString()).toBe("typed early");
+		a.engine.space!.release(docId);
+		expect(view.state.doc.toString()).toBe("typed early");
 	});
 });
