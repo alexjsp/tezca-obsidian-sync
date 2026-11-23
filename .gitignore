@@ -1,0 +1,10 @@
+node_modules/
+dist/
+plugin/main.js
+server/tezca-server
+server/data/
+*.db
+*.db-wal
+*.db-shm
+.DS_Store
+sim/.runs/

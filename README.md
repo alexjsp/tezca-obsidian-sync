@@ -1,0 +1,50 @@
+<p align="center"><img src="assets/icon.png" alt="Tezca icon: an obsidian mirror in a gold frame" width="128"></p>
+
+# Tezca
+
+Self-hosted, live, end-to-end encrypted sync for Obsidian, with real-time collaboration (multiplayer shared folders are coming in M3).
+
+- **Live:** keystroke-level sync via Yjs CRDTs. Cursors of your other devices show up in open notes.
+- **End-to-end encrypted:** the host stores and relays ciphertext only. It never sees paths, content or cursors.
+- **Self-hosted:** a single small Go binary / Docker container with SQLite. Nothing else to run.
+
+Status: **M1 (personal live sync)**. See [docs/plan.md](docs/plan.md).
+
+## Repository
+
+| Path | What |
+|---|---|
+| [`server/`](server/) | Go relay server ([README](server/README.md)) |
+| [`plugin/`](plugin/) | Obsidian plugin (TypeScript) |
+| [`proto/`](proto/) | Protobuf wire schema, codegen script and cross-language test vectors |
+| [`sim/`](sim/) | Headless multi-client simulator against the real server |
+| [`deploy/`](deploy/) | Dockerfile and compose recipes (plain HTTP, Caddy, Tailscale, Cloudflare Tunnel) |
+| [`docs/`](docs/) | [research](docs/research.md), [plan](docs/plan.md), [protocol](docs/protocol.md) |
+
+## Quick start (development)
+
+```sh
+pnpm install
+
+# server
+cd server && TEZCA_CLAIM_CODE=dev TEZCA_DATA_DIR=/tmp/tezca go run ./cmd/tezca-server
+#   → open http://localhost:8080/claim?code=dev
+
+# plugin
+pnpm -C plugin build          # → plugin/main.js, manifest.json, styles.css
+# copy those three files into <vault>/.obsidian/plugins/tezca-sync/ and enable "Tezca Sync"
+```
+
+Then, in Obsidian, either open the claim link from the claim page (`obsidian://tezca?do=claim…`), or paste it into **Settings → Tezca Sync → Set up with a link**. Save the recovery phrase. To add more devices, use **Pair another device** and scan the QR code.
+
+Mobile devices need HTTPS. See [deploy/README.md](deploy/README.md).
+
+## Tests
+
+```sh
+pnpm -C plugin test            # unit + integration tests against an in-memory mock host
+(cd server && go test -race ./...)
+pnpm sim -- --runs 5 --steps 200 --clients 4   # randomized multi-client simulation against the real server
+```
+
+`proto/gen.sh` regenerates protobuf code. `pnpm -C plugin vectors` regenerates the signature test vectors.

@@ -1,0 +1,5 @@
+packages:
+  - plugin
+  - sim
+allowBuilds:
+  esbuild: true

@@ -1,0 +1,14 @@
+{
+  "name": "tezca-workspace",
+  "private": true,
+  "scripts": {
+    "gen": "./proto/gen.sh",
+    "build": "pnpm -C plugin build",
+    "test": "pnpm -C plugin test && (cd server && go test ./...)",
+    "sim": "pnpm -C sim start"
+  },
+  "devDependencies": {
+    "@bufbuild/protoc-gen-es": "2.17.0"
+  },
+  "packageManager": "pnpm@12.19.0"
+}
