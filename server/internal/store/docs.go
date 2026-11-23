@@ -374,7 +374,7 @@ func ValidID(id string) bool {
 }
 
 // AddMember adds (or updates) a space member and stores their wrapped key for the current epoch.
-// Not reachable from the M1 protocol; used by tests and future share invites (M3).
+// Test helper; the protocol adds members through share invites (RedeemShareInvite).
 func (s *Store) AddMember(ctx context.Context, spaceID string, signPk []byte, role int, wrapped []byte) error {
 	return s.tx(ctx, func(tx *sql.Tx) error {
 		var epoch uint32
@@ -394,7 +394,7 @@ func (s *Store) AddMember(ctx context.Context, spaceID string, signPk []byte, ro
 	})
 }
 
-// SetEpoch sets a space's current key epoch (key rotation is client-driven in M3; used by tests).
+// SetEpoch sets a space's current key epoch. Test helper; the protocol rotates with RotateKey.
 func (s *Store) SetEpoch(ctx context.Context, spaceID string, epoch uint32) error {
 	_, err := s.w.ExecContext(ctx, `UPDATE spaces SET epoch = ? WHERE space_id = ?`, epoch, spaceID)
 	return err

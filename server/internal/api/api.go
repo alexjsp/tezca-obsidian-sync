@@ -48,6 +48,16 @@ type Config struct {
 
 	Blobs        blobs.BlobStore // blob bytes; blob routes are disabled if nil
 	MaxBlobBytes int64           // max plaintext blob size (default DefaultMaxBlob)
+
+	Notify Notifier // live sessions (the ws Hub); optional
+}
+
+// Notifier reaches live WebSocket sessions after a membership or key change.
+type Notifier interface {
+	// SpaceChanged pushes SpaceChanged{space} to every session of each listed user.
+	SpaceChanged(space string, signPks [][]byte)
+	// EvictMember ends signPk's live subscriptions to space's feed and docs.
+	EvictMember(space string, signPk []byte)
 }
 
 // API is the HTTP handler.
@@ -89,6 +99,14 @@ func New(cfg Config) *API {
 		m.HandleFunc("PUT /api/spaces/{space_id}/blobs/{blob_id}", a.putBlob)
 		m.HandleFunc("GET /api/spaces/{space_id}/blobs/{blob_id}", a.getBlob) // GET patterns also match HEAD
 	}
+	m.HandleFunc("POST /api/spaces/{space_id}/invites", a.createShareInvite)
+	m.HandleFunc("GET /api/spaces/{space_id}/invites", a.listShareInvites)
+	m.HandleFunc("DELETE /api/spaces/{space_id}/invites/{token}", a.revokeShareInvite)
+	m.HandleFunc("POST /api/share-invites/redeem", a.redeemShareInvite)
+	m.HandleFunc("PUT /api/spaces/{space_id}/keys", a.putKeys)
+	m.HandleFunc("PUT /api/spaces/{space_id}/members/{sign_pk}", a.setMemberRole)
+	m.HandleFunc("DELETE /api/spaces/{space_id}/members/{sign_pk}", a.removeMember)
+	m.HandleFunc("POST /api/spaces/{space_id}/rotate", a.rotate)
 	if cfg.Hub != nil {
 		m.Handle("GET /ws", cfg.Hub)
 	}
@@ -102,7 +120,7 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("Access-Control-Allow-Origin", "*")
 		h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
-		h.Set("Access-Control-Allow-Methods", "GET, POST, PUT, HEAD, OPTIONS")
+		h.Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, HEAD, OPTIONS")
 		h.Set("Access-Control-Max-Age", "86400")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)

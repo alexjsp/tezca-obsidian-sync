@@ -229,6 +229,7 @@ func (c *conn) handshake(ctx context.Context) bool {
 	}
 	c.user = user
 	c.deviceID = hello.DeviceId
+	c.h.registerUser(c) // before AuthOk, so a client that has seen AuthOk gets SpaceChanged
 	c.send(&pb.ServerFrame{Msg: &pb.ServerFrame_AuthOk{AuthOk: &pb.AuthOk{
 		SignPk: user.SignPk, BoxPk: user.BoxPk, Role: pb.HostRole(user.Role),
 	}}})

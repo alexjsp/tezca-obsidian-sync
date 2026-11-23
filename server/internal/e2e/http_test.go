@@ -97,7 +97,7 @@ func TestCORS(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != 204 || resp.Header.Get("Access-Control-Allow-Origin") != "*" ||
 		!strings.Contains(resp.Header.Get("Access-Control-Allow-Headers"), "Authorization") ||
-		resp.Header.Get("Access-Control-Allow-Methods") != "GET, POST, PUT, HEAD, OPTIONS" {
+		resp.Header.Get("Access-Control-Allow-Methods") != "GET, POST, PUT, DELETE, HEAD, OPTIONS" {
 		t.Fatalf("preflight: %d %v", resp.StatusCode, resp.Header)
 	}
 	_, _, hdr := get(t, e.srv.URL+"/api/info")

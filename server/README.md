@@ -68,7 +68,7 @@ internal/sigs      sigInput construction + Ed25519 verification (golden-vector t
 internal/store     SQLite schema, migrations, all queries (single writer conn + read pool), snapshot retention
 internal/blobs     blob byte storage: filesystem (temp file + rename) and S3 (minio-go)
 internal/ws        WebSocket sessions, hub, per-doc ordering, space feeds
-internal/api       HTTP API, signed-request auth, CORS, claim/landing pages, QR
+internal/api       HTTP API (incl. share invites, membership, key rotation), signed-request auth, CORS, claim/landing pages, QR
 internal/pb        generated protobuf code (proto/gen.sh)
 internal/e2e       end-to-end tests (httptest server + real WebSocket clients)
 ```
@@ -83,6 +83,12 @@ Per doc, every connection therefore sees seqs strictly ascending with no gaps or
 Enqueueing never blocks. If a queue overflows, the connection is closed (status 4008), never
 silently skipped, and the client resyncs with `since_seq`.
 
+Membership is re-read from the database on every request. `Subscribe` checks it under the doc
+lock and `SubscribeSpace` under the feed lock, so when a member is removed the HTTP handler can
+delete the row, then drop that user's live subscriptions to the space and its docs, and no
+subscription can slip in between. The hub indexes authenticated sessions by user to push
+`SpaceChanged`.
+
 ## Tests
 
 ```sh
@@ -92,7 +98,7 @@ go test -race ./...
 - `internal/sigs`: rebuilds every case in `proto/vectors/sig-vectors.json` and verifies the
   libsodium signatures with `crypto/ed25519`.
 - `internal/store`: claim, users, invites, pairings, spaces, updates, snapshots, prune, the
-  hourly/daily retention policy, versions, the blob index, and upgrading an M1 database.
+  hourly/daily retention policy, versions, the blob index, and upgrading M1 and M2 databases.
 - `internal/blobs`: the same contract test against the filesystem store and the S3 store (backed
   by an in-process [gofakes3](https://github.com/johannesboyne/gofakes3) server), including
   uploads that fail at EOF never becoming visible.
@@ -104,3 +110,7 @@ go test -race ./...
   slow-consumer disconnects. Blob PUT/GET/HEAD: signature auth over the streamed body, roles,
   id validation, the size limit (with and without `Content-Length`) and idempotent re-uploads.
   History: snapshot timestamps, retention under a fake clock, `ListVersions` and `GetVersion`.
+  Shares: invite create/list/revoke/redeem (every error code, expiry, idempotent re-redeem,
+  role merging), `PUT keys`, role changes and last-owner rules, removal ending live
+  subscriptions, `SpaceChanged` pushes, and key rotation (epoch and member-set checks,
+  `EPOCH_STALE` for old-epoch writes afterwards).

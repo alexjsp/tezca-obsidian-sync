@@ -187,10 +187,7 @@ func (c *conn) subscribeSpace(ctx context.Context, space string) error {
 	if !store.ValidID(space) {
 		return errBadID
 	}
-	if _, _, err := c.membership(ctx, space); err != nil {
-		return err
-	}
-	if err := c.h.subscribeSpace(ctx, c, space); err != nil {
+	if err := c.h.subscribeSpace(ctx, c, space); err != nil { // checks membership under the feed lock
 		return err
 	}
 	c.spaceSubs[space] = struct{}{}
@@ -201,11 +198,12 @@ func (c *conn) subscribe(ctx context.Context, m *pb.Subscribe) error {
 	if !store.ValidID(m.SpaceId) || !store.ValidID(m.DocId) {
 		return errBadID
 	}
-	if _, _, err := c.membership(ctx, m.SpaceId); err != nil {
-		return err
-	}
 	var opErr error
 	c.h.withDoc(m.SpaceId, m.DocId, func(ds *docState) {
+		// Membership is checked under the doc lock so EvictMember can't miss this subscription.
+		if _, _, opErr = c.membership(ctx, m.SpaceId); opErr != nil {
+			return
+		}
 		opErr = c.sendBacklog(ctx, m.SpaceId, m.DocId, m.SinceSeq)
 		if opErr == nil {
 			c.h.addSub(ds, c)

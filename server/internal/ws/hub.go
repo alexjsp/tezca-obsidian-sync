@@ -11,6 +11,7 @@
 package ws
 
 import (
+	"bytes"
 	"context"
 	"log/slog"
 	"net/http"
@@ -18,7 +19,9 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"google.golang.org/protobuf/proto"
 
+	"tezca/server/internal/pb"
 	"tezca/server/internal/store"
 )
 
@@ -61,9 +64,10 @@ type Hub struct {
 	cfg Config
 	log *slog.Logger
 
-	mu    sync.Mutex // guards docs, conns, closed
+	mu    sync.Mutex // guards docs, conns, users, shut
 	docs  map[docKey]*docState
 	conns map[*conn]struct{}
+	users map[string]map[*conn]struct{} // authenticated conns by sign_pk
 	shut  bool
 
 	spacesMu sync.Mutex // guards spaces
@@ -95,6 +99,7 @@ func NewHub(cfg Config) *Hub {
 		log:    cfg.Logger,
 		docs:   map[docKey]*docState{},
 		conns:  map[*conn]struct{}{},
+		users:  map[string]map[*conn]struct{}{},
 		spaces: map[string]map[*conn]struct{}{},
 	}
 }
@@ -123,6 +128,12 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		h.mu.Lock()
 		delete(h.conns, c)
+		if set := h.users[string(c.user.SignPk)]; set != nil {
+			delete(set, c)
+			if len(set) == 0 {
+				delete(h.users, string(c.user.SignPk))
+			}
+		}
 		h.mu.Unlock()
 	}()
 	c.serve(r.Context())
@@ -139,6 +150,74 @@ func (h *Hub) Close() {
 	h.mu.Unlock()
 	for _, c := range cs {
 		c.kill(websocket.StatusGoingAway, "server shutting down")
+	}
+}
+
+// registerUser indexes an authenticated connection by its user (for SpaceChanged).
+func (h *Hub) registerUser(c *conn) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	k := string(c.user.SignPk)
+	set := h.users[k]
+	if set == nil {
+		set = map[*conn]struct{}{}
+		h.users[k] = set
+	}
+	set[c] = struct{}{}
+}
+
+// SpaceChanged pushes SpaceChanged{space} to every connected session of each user in signPks.
+func (h *Hub) SpaceChanged(space string, signPks [][]byte) {
+	b, _ := proto.Marshal(&pb.ServerFrame{Msg: &pb.ServerFrame_SpaceChanged{SpaceChanged: &pb.SpaceChanged{SpaceId: space}}})
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	seen := map[string]bool{}
+	for _, pk := range signPks {
+		if seen[string(pk)] {
+			continue
+		}
+		seen[string(pk)] = true
+		for c := range h.users[string(pk)] {
+			c.sendRaw(b)
+		}
+	}
+}
+
+// EvictMember ends every live subscription signPk's sessions hold on space's doc-heads feed
+// and on its docs. Call it after the membership row is gone: subscribe re-checks membership
+// under the same locks, so no subscription can be registered after this returns.
+//
+// The connections' own docSubs/spaceSubs sets (reader-goroutine only) keep stale entries;
+// that's harmless because removeSub and unsubscribeSpace are idempotent.
+func (h *Hub) EvictMember(space string, signPk []byte) {
+	h.mu.Lock()
+	var keys []docKey
+	for k := range h.docs {
+		if k.space == space {
+			keys = append(keys, k)
+		}
+	}
+	h.mu.Unlock()
+	for _, k := range keys {
+		h.withDoc(k.space, k.doc, func(ds *docState) {
+			for c := range ds.subs {
+				if bytes.Equal(c.user.SignPk, signPk) {
+					h.removeSub(ds, c)
+				}
+			}
+		})
+	}
+	h.spacesMu.Lock()
+	defer h.spacesMu.Unlock()
+	if set := h.spaces[space]; set != nil {
+		for c := range set {
+			if bytes.Equal(c.user.SignPk, signPk) {
+				delete(set, c)
+			}
+		}
+		if len(set) == 0 {
+			delete(h.spaces, space)
+		}
 	}
 }
 
@@ -197,11 +276,14 @@ func (h *Hub) broadcastHeads(space string, frame []byte) {
 	}
 }
 
-// subscribeSpace registers c for a space's feed and enqueues the full DocHeads atomically with
-// respect to incremental heads.
+// subscribeSpace checks membership, registers c for a space's feed and enqueues the full
+// DocHeads, atomically with respect to incremental heads and to EvictMember.
 func (h *Hub) subscribeSpace(ctx context.Context, c *conn, space string) error {
 	h.spacesMu.Lock()
 	defer h.spacesMu.Unlock()
+	if _, _, err := c.membership(ctx, space); err != nil {
+		return err
+	}
 	heads, err := h.cfg.Store.DocHeads(ctx, space)
 	if err != nil {
 		return err

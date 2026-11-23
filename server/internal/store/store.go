@@ -26,6 +26,9 @@ var (
 	ErrBadCode    = errors.New("invalid claim code")
 	ErrExpired    = errors.New("expired")
 	ErrRedeemed   = errors.New("already redeemed")
+	ErrForbidden  = errors.New("forbidden")
+	ErrLastOwner  = errors.New("last owner")
+	ErrBadKeys    = errors.New("keys do not match")
 )
 
 // Host roles (match pb.HostRole).
@@ -126,6 +129,12 @@ CREATE TABLE snapshots(space_id TEXT NOT NULL, doc_id TEXT NOT NULL, base_seq IN
 	// v2 (M2): blob index. snapshots.created_at already exists since v1.
 	`
 CREATE TABLE IF NOT EXISTS blobs(space_id TEXT NOT NULL, blob_id TEXT NOT NULL, size INT NOT NULL, created_by BLOB NOT NULL, created_at INT NOT NULL, PRIMARY KEY(space_id, blob_id));
+`,
+	// v3 (M3): share invites. Separate from the host invites table.
+	`
+CREATE TABLE IF NOT EXISTS share_invites(token TEXT PRIMARY KEY, space_id TEXT NOT NULL, role INT NOT NULL, created_by BLOB NOT NULL, created_at INT NOT NULL, expires_at INT NOT NULL, revoked INT NOT NULL DEFAULT 0, redeemed_by BLOB, redeemed_at INT);
+CREATE INDEX IF NOT EXISTS share_invites_by_space ON share_invites(space_id);
+CREATE TABLE IF NOT EXISTS share_invite_keys(token TEXT NOT NULL, epoch INT NOT NULL, wrapped BLOB NOT NULL, PRIMARY KEY(token, epoch));
 `,
 }
 

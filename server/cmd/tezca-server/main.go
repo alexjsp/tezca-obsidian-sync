@@ -167,7 +167,7 @@ func run() error {
 
 	hub := ws.NewHub(ws.Config{Store: st, ServerID: serverID, Logger: log})
 	handler := api.New(api.Config{
-		Store: st, Hub: hub, ServerID: serverID, PublicURL: publicURL, Name: name, Logger: log,
+		Store: st, Hub: hub, Notify: hub, ServerID: serverID, PublicURL: publicURL, Name: name, Logger: log,
 		Blobs: blobStore, MaxBlobBytes: int64(maxBlobMB) << 20,
 	})
 

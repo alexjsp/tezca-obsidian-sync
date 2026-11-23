@@ -95,13 +95,13 @@ the URL used in generated links. Otherwise the URL is taken from `X-Forwarded-Pr
 
 Cross-origin access: every `/api/*` response carries `Access-Control-Allow-Origin: *`,
 `Access-Control-Allow-Headers: Authorization, Content-Type` and
-`Access-Control-Allow-Methods: GET, POST, PUT, HEAD, OPTIONS`, and `OPTIONS` preflights get `204`. `/ws` accepts
+`Access-Control-Allow-Methods: GET, POST, PUT, DELETE, HEAD, OPTIONS`, and `OPTIONS` preflights get `204`. `/ws` accepts
 any `Origin` (Obsidian connects from `app://obsidian.md`, `capacitor://localhost`, …). Both are safe
 because authentication is by signature, never by cookies.
 
 HTTP errors return a JSON body `{"error": "..."}` with status 400 (bad input), 401 (bad, missing or
 skewed signature, or unknown user), 403 (not admin, wrong claim code, or not a member of the space / not allowed to write), 404 (unknown invite or
-pairing), 409 (already claimed, or invite redeemed by another key), 410 (invite expired) or
+pairing), 409 (already claimed, invite redeemed by another key, last owner, key set doesn't match), 410 (invite expired or revoked) or
 413 (too large).
 
 JSON byte fields are `b64u`. HTTP sig header:
@@ -266,6 +266,16 @@ After redeeming, the client unwraps the keys with `secret`, re-wraps each for it
 and uploads them, so its other devices receive them through `ListSpaces`:
 
 | `PUT /api/spaces/{space_id}/keys` | HTTP sig, member | `{keys: [{epoch, wrapped}]}` → `{}`. Stores the caller's own wrapped keys (replacing any for the same epoch). Epochs must be `≤ current`. |
+
+Details:
+- A redeem's `role` is the caller's resulting role; `kind` is `"root"`, `"share"` or `"profile"`;
+  `meta` is b64u; times are unix seconds. `ttl_seconds` is clamped to 1 minute … 30 days.
+- Revoked invites answer redeem with 410 and are left out of `GET`; revoking twice is fine.
+- Re-redeeming by the original redeemer works (even after expiry) only while they're still a
+  member; after they leave or are removed the link answers 410, so it can't undo a removal.
+- Rotating the key revokes pending invites (their keys stop at the old epoch).
+- Key sets that don't match current state (invite epochs, rotation members) are 409; malformed
+  ones (duplicates, empty or > 256-byte wrapped keys, a `PUT keys` epoch above current) are 400.
 
 ### Membership
 

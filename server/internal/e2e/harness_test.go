@@ -40,8 +40,9 @@ type env struct {
 	hub      *ws.Hub
 	srv      *httptest.Server
 	serverID string
-	clock    *fakeClock // the hub's clock (snapshot created_at); HTTP auth uses real time
-	blobDir  string     // filesystem blob store root
+	clock    *fakeClock   // the hub's clock (snapshot created_at)
+	apiClock *offsetClock // the HTTP API's clock: real time plus a settable offset
+	blobDir  string       // filesystem blob store root
 }
 
 // testMaxBlob is the plaintext blob limit in tests: small, so 413s don't need huge bodies.
@@ -63,6 +64,31 @@ func (c *fakeClock) Set(t time.Time) {
 	c.mu.Lock()
 	c.t = t
 	c.mu.Unlock()
+}
+
+// offsetClock is real time shifted by a settable offset (0 by default).
+type offsetClock struct {
+	mu sync.Mutex
+	d  time.Duration
+}
+
+func (c *offsetClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return time.Now().Add(c.d)
+}
+
+// Advance moves the clock forward; signed requests then need skew = Offset().
+func (c *offsetClock) Advance(d time.Duration) {
+	c.mu.Lock()
+	c.d += d
+	c.mu.Unlock()
+}
+
+func (c *offsetClock) Offset() time.Duration {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.d
 }
 
 func newEnv(t *testing.T, mod func(*ws.Config)) *env {
@@ -88,14 +114,16 @@ func newEnv(t *testing.T, mod func(*ws.Config)) *env {
 		mod(&cfg)
 	}
 	hub := ws.NewHub(cfg)
-	h := api.New(api.Config{Store: st, Hub: hub, ServerID: id, Name: "Test", Logger: log, Blobs: bs, MaxBlobBytes: testMaxBlob})
+	apiClock := &offsetClock{}
+	h := api.New(api.Config{Store: st, Hub: hub, Notify: hub, ServerID: id, Name: "Test", Logger: log, Now: apiClock.Now,
+		Blobs: bs, MaxBlobBytes: testMaxBlob})
 	srv := httptest.NewServer(h)
 	t.Cleanup(func() {
 		hub.Close()
 		srv.Close()
 		st.Close()
 	})
-	return &env{t: t, st: st, hub: hub, srv: srv, serverID: id, clock: clock, blobDir: blobDir}
+	return &env{t: t, st: st, hub: hub, srv: srv, serverID: id, clock: clock, apiClock: apiClock, blobDir: blobDir}
 }
 
 type ident struct {
