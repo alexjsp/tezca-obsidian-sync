@@ -141,6 +141,11 @@ export class DiskMirror {
 	private stopped = false;
 	/** Vault events seen before the startup reconcile finished. */
 	private early: VaultEvent[] = [];
+	/**
+	 * Paths a queued local delete/rename is about to remove. A verify that runs first must not
+	 * re-create the file (it would then be left behind, untracked, once the event is handled).
+	 */
+	private goingAway = new Map<string, number>();
 	// Blob transfers run outside the serial queue; verifyBlob picks up their results.
 	private downloaded = new Map<string, Uint8Array>(); // blob id → plaintext ready to write
 	private downloadedBytes = 0;
@@ -715,7 +720,14 @@ export class DiskMirror {
 			if (ev.type === "delete") this.expectedDeletes.delete(ev.path);
 			return;
 		}
-		void this.enqueue(() => this.handleVaultEvent(ev));
+		const gone = ev.type === "delete" ? ev.path : ev.type === "rename" ? ev.oldPath : null;
+		if (gone) this.goingAway.set(gone, (this.goingAway.get(gone) ?? 0) + 1);
+		void this.enqueue(() => this.handleVaultEvent(ev)).finally(() => {
+			if (!gone) return;
+			const n = (this.goingAway.get(gone) ?? 1) - 1;
+			if (n > 0) this.goingAway.set(gone, n);
+			else this.goingAway.delete(gone);
+		});
 	}
 
 	private async handleVaultEvent(ev: VaultEvent): Promise<void> {
@@ -1184,6 +1196,7 @@ export class DiskMirror {
 				return;
 			}
 			if (D === null) {
+				if (this.goingAway.has(vp)) return; // a local delete/move of this file is queued
 				await this.selfWrite(vp, C, null);
 				await this.setBaseline(id, e.path, C);
 				return;
@@ -1291,6 +1304,7 @@ export class DiskMirror {
 			return;
 		}
 		if (D === null) {
+			if (this.goingAway.has(vp)) return; // a local delete/move of this file is queued
 			await this.writeRemoteBlob(e, C, null);
 			return;
 		}

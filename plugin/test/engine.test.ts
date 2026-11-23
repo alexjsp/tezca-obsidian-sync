@@ -232,6 +232,23 @@ describe("sync engine (mock host)", () => {
 		expect(a.vault.files.get("n00.md")).toBe("note 0\ntyped during startup\n");
 	});
 
+	it("a verify queued before a local delete doesn't bring the file back", async () => {
+		const { a, b } = await pair({ a: { "n.md": "v1" } });
+		await converged(a, b);
+		const mirror = b.engine.mirror! as unknown as { enqueue(fn: () => Promise<void>): Promise<void> };
+		// Keep B's mirror busy so the next two things queue up behind it, in this order:
+		let release!: () => void;
+		void mirror.enqueue(() => new Promise<void>((r) => (release = r)));
+		await a.vault.userWrite("n.md", "v2 from A"); // 1. a remote edit → B queues a verify of n.md
+		await new Promise((r) => setTimeout(r, 400));
+		await b.vault.remove("n.md"); // 2. B deletes the file; its event queues after the verify
+		await new Promise((r) => setTimeout(r, 50));
+		release();
+		await converged(a, b);
+		expect(b.vault.files.has("n.md")).toBe(false);
+		expect(a.vault.files.has("n.md")).toBe(false);
+	});
+
 	it("ignores hidden folders", async () => {
 		const { a, b } = await pair({ a: { ".obsidian/app.json": "{}", "img.png": "binary", "ok.md": "ok" } });
 		await converged(a, b);
