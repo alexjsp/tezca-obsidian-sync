@@ -249,6 +249,29 @@ describe("sync engine (mock host)", () => {
 		expect(a.vault.files.has("n.md")).toBe(false);
 	});
 
+	it("a rename made while sync is starting stays a rename (concurrent edits elsewhere survive)", async () => {
+		const { host, id, spaceId, a, b } = await pair({ a: { "n.md": "base\n" } });
+		await converged(a, b);
+		await a.engine.stop();
+		clients = clients.filter((c) => c !== a);
+		host.latency = 40; // slow host: A's startup reconcile waits a while
+		const engine = new SyncEngine({ host: "http://mock", identity: id, deviceId: "A", deviceName: "A", spaceId, store: a.store, vault: a.vault, clientVersion: "test", WebSocketImpl: host.WebSocket, http: host.http, startupWaitMs: 3000 });
+		const starting = engine.start();
+		await eventually(() => engine.mirror !== null, 3000, "mirror created");
+		await new Promise((r) => setTimeout(r, 100));
+		expect(engine.mirror!.isReady).toBe(false);
+		await a.vault.rename("n.md", "renamed.md"); // during startup
+		await b.vault.userWrite("n.md", "base\nedit from B\n"); // concurrently, on B
+		await starting;
+		host.latency = 0;
+		const a2 = { ...a, engine };
+		clients.push(a2);
+		await converged(a2, b);
+		expect(a2.vault.files.get("renamed.md")).toBe("base\nedit from B\n");
+		expect(b.vault.files.has("n.md")).toBe(false);
+		expect(engine.mirror!.index.live().filter((e) => e.kind === "md").length).toBe(1);
+	});
+
 	it("ignores hidden folders", async () => {
 		const { a, b } = await pair({ a: { ".obsidian/app.json": "{}", "img.png": "binary", "ok.md": "ok" } });
 		await converged(a, b);

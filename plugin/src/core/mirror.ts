@@ -230,11 +230,17 @@ export class DiskMirror {
 	 * (or immediately when offline, to work from local state).
 	 */
 	async initialReconcile(): Promise<void> {
+		// Local changes made before now (e.g. while waiting for the host) are applied first: a rename
+		// must stay a rename, not look like "deleted while closed" plus a new file to the reconcile
+		// (which detached the note from everyone else's concurrent edits).
+		const before = this.early;
+		this.early = [];
+		for (const ev of before) this.dispatchEvent(ev);
 		await this.enqueue(() => this.reconcileAll());
 		this.ready = true;
-		const early = this.early;
+		const during = this.early;
 		this.early = [];
-		for (const ev of early) this.onVaultEvent(ev);
+		for (const ev of during) this.onVaultEvent(ev);
 		for (const d of this.space.staleDocs()) if (d !== INDEX_DOC) this.fetchRemote(d);
 		const first = this.touched.values().next();
 		if (!first.done) this.touch(first.value);
@@ -444,6 +450,17 @@ export class DiskMirror {
 		const dot = vaultPath.lastIndexOf(".");
 		const cut = dot > slash + 1 ? dot : vaultPath.length;
 		return `${vaultPath.slice(0, cut)} (conflict ${this.opts.deviceName} ${d}${n > 1 ? ` ${n}` : ""})${vaultPath.slice(cut)}`;
+	}
+
+	/** "dir/name (label).ext", made unique. */
+	private async siblingPath(vaultPath: string, label: string): Promise<string> {
+		const slash = vaultPath.lastIndexOf("/");
+		const dot = vaultPath.lastIndexOf(".");
+		const cut = dot > slash + 1 ? dot : vaultPath.length;
+		const make = (n: number) => `${vaultPath.slice(0, cut)} (${label}${n > 1 ? ` ${n}` : ""})${vaultPath.slice(cut)}`;
+		let p = make(1);
+		for (let i = 2; await this.vault.exists(p); i++) p = make(i);
+		return p;
 	}
 
 	private async writeConflictCopyBinary(vaultPath: string, data: Uint8Array, why: string): Promise<string> {
@@ -708,11 +725,15 @@ export class DiskMirror {
 	private onVaultEvent(ev: VaultEvent) {
 		if (this.stopped) return;
 		if (!this.ready) {
-			// Startup reconcile still running: keep the event (e.g. the user typing during startup)
-			// and replay it once the reconcile is done, rather than losing it.
+			// Before the startup reconcile finishes: keep the event (e.g. the user typing or renaming
+			// during startup) and apply it at the right point, rather than losing it.
 			if (this.early.length < 10_000) this.early.push(ev);
 			return;
 		}
+		this.dispatchEvent(ev);
+	}
+
+	private dispatchEvent(ev: VaultEvent) {
 		const relevant =
 			this.inScope(ev.path, ev.kind) || (ev.type === "rename" && this.inScope(ev.oldPath, ev.kind));
 		if (!relevant) {
@@ -1253,9 +1274,19 @@ export class DiskMirror {
 			if (oldHash !== null && (oldHash === base.hash || oldHash === this.unsyncedBlob.get(id)) && !(await this.vault.exists(vp))) {
 				await this.selfRename(oldVp, vp);
 			} else if (oldHash !== null) {
-				// A local edit not yet synced stays at the old path: track it as a file of its own
-				// (once this entry has moved off that path) rather than orphaning it.
-				void this.enqueue(() => this.importNewFile(oldVp));
+				// A local edit not yet synced raced the rename. Keep it as a file of its own, under a
+				// name nobody can confuse with the old path (other devices still resolve that rename
+				// there), and tell the user.
+				const copy = await this.siblingPath(oldVp, `edited on ${this.opts.deviceName}`);
+				void this.enqueue(async () => {
+					if (!(await this.vault.exists(oldVp)) || (await this.vault.exists(copy))) return;
+					await this.vault.rename(oldVp, copy); // not a self-rename: the event imports it
+					this.notices.emit({
+						kind: "conflict",
+						message: `"${oldVp}" was renamed on another device while you were editing it; your edit is kept as "${copy}"`,
+						paths: [vp, copy],
+					});
+				});
 			}
 			base = { ...base, path: e.path };
 			this.state.baselines[id] = base;

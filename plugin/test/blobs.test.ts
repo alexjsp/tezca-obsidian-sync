@@ -156,7 +156,8 @@ describe("blob sync", () => {
 		b.engine.mirror!.retryTransfers();
 		await converged(a, b);
 		// The edit is kept: moved with the file, or (if it raced the rename) as a file of its own.
-		const synced = await Promise.all(["moved/p.bin", "p.bin"].map((p) => bin(a.vault, p)));
+		const candidates = [...a.vault.files.keys()].filter((p) => p === "moved/p.bin" || p.startsWith("p (edited on"));
+		const synced = await Promise.all(candidates.map((p) => bin(a.vault, p)));
 		expect(synced).toContain(bytesFingerprint(bytes(1, 2)));
 	});
 
