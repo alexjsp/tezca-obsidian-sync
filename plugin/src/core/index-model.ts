@@ -1,8 +1,12 @@
-// The space index doc: fileId → { path, kind, deleted }.
+// The space index doc: fileId → { path, kind, deleted, … }. Format: protocol.md "Index document".
 // Each entry is a nested Y.Map so concurrent edits to different fields merge.
 import * as Y from "yjs";
+import type { BlobRef } from "./blobs";
 
-export type EntryKind = "md" | "folder";
+export type EntryKind = "md" | "folder" | "blob";
+
+/** How many earlier versions a blob entry keeps. */
+export const BLOB_HISTORY = 20;
 
 export interface Entry {
 	id: string;
@@ -11,6 +15,10 @@ export interface Entry {
 	deleted: boolean;
 	ctime: number;
 	mtime: number;
+	/** Blob entries: current content, or null while the first upload is pending. */
+	blob?: BlobRef | null;
+	/** Blob entries: earlier versions, newest first. */
+	prev?: BlobRef[];
 }
 
 export function canonicalPath(p: string): string {
@@ -64,6 +72,22 @@ export class IndexModel {
 		}, origin);
 	}
 
+	/** Record a new blob version (the current one moves into `prev`). No-op if unchanged. */
+	setBlob(id: string, ref: BlobRef, origin?: unknown): void {
+		const m = this.files.get(id);
+		if (!m) return;
+		const cur = parseRef(m.get("blob"));
+		if (cur?.id === ref.id && cur.epoch === ref.epoch) return;
+		this.ydoc.transact(() => {
+			if (cur) {
+				const prev = [cur, ...parseRefs(m.get("prev")).filter((r) => r.id !== ref.id && r.id !== cur.id)].slice(0, BLOB_HISTORY);
+				m.set("prev", JSON.stringify(prev));
+			}
+			m.set("blob", JSON.stringify(ref));
+			m.set("mtime", Date.now());
+		}, origin);
+	}
+
 	tombstone(id: string, origin?: unknown): void {
 		const m = this.files.get(id);
 		if (!m || m.get("deleted") === true) return;
@@ -112,8 +136,8 @@ export class IndexModel {
 function toEntry(id: string, m: Y.Map<unknown>): Entry | null {
 	const path = m.get("path");
 	const kind = m.get("kind");
-	if (typeof path !== "string" || (kind !== "md" && kind !== "folder")) return null;
-	return {
+	if (typeof path !== "string" || (kind !== "md" && kind !== "folder" && kind !== "blob")) return null;
+	const e: Entry = {
 		id,
 		path,
 		kind,
@@ -121,6 +145,31 @@ function toEntry(id: string, m: Y.Map<unknown>): Entry | null {
 		ctime: Number(m.get("ctime") ?? 0),
 		mtime: Number(m.get("mtime") ?? 0),
 	};
+	if (kind === "blob") {
+		e.blob = parseRef(m.get("blob"));
+		e.prev = parseRefs(m.get("prev"));
+	}
+	return e;
+}
+
+function parseRef(v: unknown): BlobRef | null {
+	if (typeof v !== "string") return null;
+	try {
+		const r = JSON.parse(v) as BlobRef;
+		return typeof r.id === "string" && typeof r.hash === "string" && typeof r.epoch === "number" ? r : null;
+	} catch {
+		return null;
+	}
+}
+
+function parseRefs(v: unknown): BlobRef[] {
+	if (typeof v !== "string") return [];
+	try {
+		const a = JSON.parse(v) as unknown[];
+		return Array.isArray(a) ? a.map((x) => parseRef(JSON.stringify(x))).filter((r): r is BlobRef => r !== null) : [];
+	} catch {
+		return [];
+	}
 }
 
 export function conflictPath(path: string, id: string): string {

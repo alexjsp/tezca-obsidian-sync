@@ -3,8 +3,9 @@ import { fromBinary, toBinary } from "@bufbuild/protobuf";
 import { SpaceInfoSchema, type SpaceInfo } from "../proto/tezca/v1/sync_pb";
 import { HostConnection, type ConnStatus, type WSCtor } from "./connection";
 import type { Identity } from "./crypto";
-import { DiskMirror, type MirrorNotice } from "./mirror";
-import { listSpaces, waitOnline } from "./setup";
+import { BlobClient } from "./blobs";
+import { DEFAULT_MAX_BLOB_BYTES, DiskMirror, type MirrorNotice } from "./mirror";
+import { HostApi, fetchHttp, listSpaces, waitOnline, type HttpFn } from "./setup";
 import { SpaceSync } from "./space";
 import type { LocalStore } from "./store";
 import { Emitter, log } from "./util";
@@ -23,6 +24,10 @@ export interface EngineOptions {
 	isBound?: (vaultPath: string) => boolean;
 	/** How long to wait for the server before reconciling from local state. */
 	startupWaitMs?: number;
+	/** HTTP transport for blobs (Obsidian passes requestUrl; defaults to fetch). */
+	http?: HttpFn;
+	/** Retry delay for failed blob transfers. */
+	blobRetryMs?: number;
 }
 
 export interface EngineStatus {
@@ -39,6 +44,7 @@ export class SyncEngine {
 	readonly status = new Emitter<EngineStatus>();
 	readonly notices = new Emitter<MirrorNotice>();
 	private stopped = false;
+	private maxBlobBytes = DEFAULT_MAX_BLOB_BYTES;
 
 	constructor(readonly opts: EngineOptions) {
 		this.conn = new HostConnection({
@@ -71,11 +77,16 @@ export class SyncEngine {
 		const space = new SpaceSync(this.conn, store, identity, info);
 		this.space = space;
 		await space.start();
+		const http = this.opts.http ?? fetchHttp;
 		const mirror = new DiskMirror(space, this.opts.vault, {
 			mount: "",
 			deviceName: this.opts.deviceName,
 			isBound: this.opts.isBound,
+			blobs: new BlobClient(this.opts.host, identity, http),
+			maxBlobBytes: () => this.maxBlobBytes,
+			retryMs: this.opts.blobRetryMs,
 		});
+		void this.fetchLimits(http);
 		this.mirror = mirror;
 		mirror.notices.on((n) => this.notices.emit(n));
 		mirror.idleChanged.on(() => this.emitStatus());
@@ -120,7 +131,17 @@ export class SyncEngine {
 		return info;
 	}
 
+	private async fetchLimits(http: HttpFn) {
+		try {
+			const info = await new HostApi(this.opts.host, http).info();
+			if (info.max_blob_bytes) this.maxBlobBytes = info.max_blob_bytes;
+		} catch (e) {
+			log.debug("could not read host limits", e);
+		}
+	}
+
 	private async onOnline() {
+		this.mirror?.retryTransfers();
 		try {
 			const info = await this.fetchInfo();
 			this.space?.applyInfo(info);

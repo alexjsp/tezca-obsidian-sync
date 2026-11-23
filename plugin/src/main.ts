@@ -14,7 +14,7 @@ import {
 	type Identity,
 } from "./core/crypto";
 import { SyncEngine, type EngineStatus } from "./core/engine";
-import { HostApi, createRootSpace, listSpaces, normalizeHost, parseDeepLink, waitOnline, type HttpFn } from "./core/setup";
+import { HostApi, createRootSpace, httpResponse, listSpaces, normalizeHost, parseDeepLink, waitOnline, type HttpFn } from "./core/setup";
 import { SpaceSync } from "./core/space";
 import { IdbStore } from "./core/store";
 import { log } from "./core/util";
@@ -53,14 +53,9 @@ const COLORS = ["#e8590c", "#1c7ed6", "#2f9e44", "#ae3ec9", "#f08c00", "#0c8599"
 const KEYSTORE = "tezca-keys";
 
 const obsidianHttp: HttpFn = async ({ method, url, headers, body }) => {
-	const res = await requestUrl({ url, method, headers, body, throw: false });
-	let json: unknown = null;
-	try {
-		json = res.json;
-	} catch {
-		/* not json */
-	}
-	return { status: res.status, json, text: res.text };
+	const raw = body instanceof Uint8Array ? body.slice().buffer : body;
+	const res = await requestUrl({ url, method, headers, body: raw, throw: false });
+	return httpResponse(res.status, new Uint8Array(res.arrayBuffer));
 };
 
 export default class TezcaPlugin extends Plugin {
@@ -183,6 +178,7 @@ export default class TezcaPlugin extends Plugin {
 			vault: new ObsidianVault(this.app),
 			clientVersion: this.manifest.version,
 			isBound: (p) => this.editors.isBound(p),
+			http: obsidianHttp,
 		});
 		this.engine = engine;
 		engine.status.on((s) => {

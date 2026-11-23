@@ -1,13 +1,14 @@
 // DiskMirror: keeps a space's files on disk and its CRDT state in agreement.
 // Implements the disk contract in docs/plan.md ("Disk bridge / conflicts").
 import type * as Y from "yjs";
-import { fingerprint, randomId } from "./crypto";
+import type { BlobClient, BlobRef } from "./blobs";
+import { bytesFingerprint, fingerprint, randomId } from "./crypto";
 import { REMOTE_ORIGIN, type DocSync } from "./doc-sync";
 import { IndexModel, canonicalPath, type Entry } from "./index-model";
 import { INDEX_DOC, type SpaceSync } from "./space";
 import { applyTextDiff, threeWayMerge } from "./text-diff";
 import type { VaultAdapter, VaultEvent } from "./vault";
-import { Emitter, log } from "./util";
+import { Emitter, log, Semaphore } from "./util";
 
 export const LOCAL_ORIGIN = "tezca-local";
 export const TEXT_KEY = "content";
@@ -35,6 +36,23 @@ export interface MirrorOptions {
 	/** Safety brake thresholds. */
 	brake?: { minFiles: number; fraction: number };
 	now?: () => Date;
+	/** Transfers attachments and other non-Markdown files. Without it only Markdown syncs. */
+	blobs?: BlobClient;
+	/** Largest file (bytes) synced as a blob. */
+	maxBlobBytes?: () => number;
+	/** Delay before retrying a failed blob transfer. */
+	retryMs?: number;
+}
+
+/** Default blob size cap when the host doesn't say. */
+export const DEFAULT_MAX_BLOB_BYTES = 100 * 1024 * 1024;
+const BLOB_CONCURRENCY = 4;
+/** Downloaded blobs waiting to be written are kept up to this many bytes (oldest evicted first). */
+const DOWNLOAD_CACHE_BYTES = 64 * 1024 * 1024;
+
+/** What kind of entry a file at this path is. */
+export function fileKind(path: string): "md" | "blob" {
+	return path.toLowerCase().endsWith(".md") ? "md" : "blob";
 }
 
 export interface MirrorNotice {
@@ -76,6 +94,16 @@ export class DiskMirror {
 	private stateTimer: ReturnType<typeof setTimeout> | null = null;
 	private indexTimer: ReturnType<typeof setTimeout> | null = null;
 	private stopped = false;
+	// Blob transfers run outside the serial queue; verifyBlob picks up their results.
+	private downloaded = new Map<string, Uint8Array>(); // blob id → plaintext ready to write
+	private downloadedBytes = 0;
+	private uploaded = new Map<string, BlobRef>(); // plaintext hash → uploaded, not yet recorded
+	/** Transfer key → entry ids to re-verify when it finishes (several entries can share a blob). */
+	private inflight = new Map<string, Set<string>>();
+	private transferSlots = new Semaphore(BLOB_CONCURRENCY);
+	private retryIds = new Set<string>();
+	private retryTimer: ReturnType<typeof setTimeout> | null = null;
+	private tooLarge = new Set<string>();
 
 	constructor(
 		readonly space: SpaceSync,
@@ -107,7 +135,7 @@ export class DiskMirror {
 		if (rel === null || rel === "") return false;
 		if (rel.split("/").some((seg) => seg.startsWith("."))) return false;
 		if (this.localOnly.has(vaultPath)) return false;
-		if (kind === "file") return rel.toLowerCase().endsWith(".md");
+		if (kind === "file") return fileKind(rel) === "md" || this.opts.blobs !== undefined;
 		return true;
 	}
 
@@ -154,6 +182,7 @@ export class DiskMirror {
 		this.stopped = true;
 		for (const off of this.offs) off();
 		if (this.sweepTimer) clearTimeout(this.sweepTimer);
+		if (this.retryTimer) clearTimeout(this.retryTimer);
 		await this.queue.catch(() => undefined);
 		await this.saveState();
 	}
@@ -163,7 +192,7 @@ export class DiskMirror {
 		for (;;) {
 			const q = this.queue;
 			await q.catch(() => undefined);
-			if (q === this.queue && this.touched.size === 0 && !this.sweepTimer) return;
+			if (q === this.queue && this.touched.size === 0 && !this.sweepTimer && this.inflight.size === 0) return;
 			if (q === this.queue) await new Promise((r) => setTimeout(r, SWEEP_DEBOUNCE_MS + 10));
 		}
 	}
@@ -196,6 +225,21 @@ export class DiskMirror {
 		this.state.baselines[id] = { path: rel, hash, seq: this.space.localSeq(id).toString() };
 		this.scheduleStateSave();
 		if (prev?.hash !== hash) await this.space.store.put(`basetext/${this.space.spaceId}/${id}`, text);
+	}
+
+	private setBlobBaseline(id: string, rel: string, hash: string) {
+		this.state.baselines[id] = { path: rel, hash };
+		this.scheduleStateSave();
+	}
+
+	/** Content fingerprint of a file on disk (text or bytes per its kind), or null if missing. */
+	private async diskHash(vp: string, kind: "md" | "blob" | "folder"): Promise<string | null> {
+		if (kind === "blob") {
+			const b = await this.vault.readBinary(vp);
+			return b ? bytesFingerprint(b) : null;
+		}
+		const t = await this.vault.read(vp);
+		return t === null ? null : fingerprint(t);
 	}
 
 	private dropBaseline(id: string) {
@@ -258,10 +302,23 @@ export class DiskMirror {
 		await this.vault.write(vaultPath, text);
 	}
 
+	/** Write bytes we own; with `expected` (a disk hash, or null for "absent") a compare-and-swap. */
+	private async selfWriteBinary(vaultPath: string, data: Uint8Array, expected?: string | null) {
+		if (expected !== undefined && (await this.diskHash(vaultPath, "blob")) !== expected) throw new DiskChanged(vaultPath);
+		const list = this.expectedWrites.get(vaultPath) ?? [];
+		list.push(bytesFingerprint(data));
+		if (list.length > 8) list.shift();
+		this.expectedWrites.set(vaultPath, list);
+		await this.vault.writeBinary(vaultPath, data);
+	}
+
 	private consumeExpectedWrite(vaultPath: string, text: string): boolean {
+		return this.consumeExpectedHash(vaultPath, fingerprint(text));
+	}
+
+	private consumeExpectedHash(vaultPath: string, h: string): boolean {
 		const list = this.expectedWrites.get(vaultPath);
 		if (!list) return false;
-		const h = fingerprint(text);
 		const i = list.indexOf(h);
 		if (i === -1) return false;
 		list.splice(0, i + 1); // this and every older expectation are settled
@@ -298,6 +355,23 @@ export class DiskMirror {
 		for (let i = 2; await this.vault.exists(p); i++) p = `${vaultPath.slice(0, dot)} (conflict ${this.opts.deviceName} ${d} ${i})${vaultPath.slice(dot)}`;
 		this.addLocalOnly(p);
 		await this.selfWrite(p, text);
+		this.notices.emit({ kind: "conflict", message: `${why}: kept your version as "${p}"`, paths: [vaultPath, p] });
+		return p;
+	}
+
+	private conflictCopyPath(vaultPath: string, n: number): string {
+		const d = (this.opts.now?.() ?? new Date()).toISOString().slice(0, 16).replace("T", " ").replace(":", "");
+		const slash = vaultPath.lastIndexOf("/");
+		const dot = vaultPath.lastIndexOf(".");
+		const cut = dot > slash + 1 ? dot : vaultPath.length;
+		return `${vaultPath.slice(0, cut)} (conflict ${this.opts.deviceName} ${d}${n > 1 ? ` ${n}` : ""})${vaultPath.slice(cut)}`;
+	}
+
+	private async writeConflictCopyBinary(vaultPath: string, data: Uint8Array, why: string): Promise<string> {
+		let p = this.conflictCopyPath(vaultPath, 1);
+		for (let i = 2; await this.vault.exists(p); i++) p = this.conflictCopyPath(vaultPath, i);
+		this.addLocalOnly(p);
+		await this.selfWriteBinary(p, data);
 		this.notices.emit({ kind: "conflict", message: `${why}: kept your version as "${p}"`, paths: [vaultPath, p] });
 		return p;
 	}
@@ -349,7 +423,7 @@ export class DiskMirror {
 					plan.push(async () => {
 						await this.selfRename(oldVp, vp);
 						this.state.baselines[e.id] = { ...base, path: e.path };
-						await this.reconcileFile(e, vp, base);
+						await this.reconcileEntry(e, vp, this.state.baselines[e.id]);
 					});
 					continue;
 				}
@@ -357,7 +431,7 @@ export class DiskMirror {
 			const decision = await this.peekFile(e, actual ?? vp, base, actual !== undefined);
 			if (decision === "overwrite") overwrites++;
 			if (decision === "delete") deletes++;
-			plan.push(() => this.reconcileFile(e, actual ?? vp, base));
+			plan.push(() => this.reconcileEntry(e, actual ?? vp, base));
 		}
 
 		// 3. tombstoned entries whose files are still on disk
@@ -369,10 +443,7 @@ export class DiskMirror {
 			const tomb = tombByPath.get(k);
 			if (tomb) {
 				const base = this.state.baselines[tomb.id];
-				if (base) {
-					const text = await this.vault.read(vp);
-					if (text !== null && fingerprint(text) === base.hash) deletes++;
-				}
+				if (base && (await this.diskHash(vp, tomb.kind)) === base.hash) deletes++;
 				plan.push(() => this.handleRemoteDelete(tomb, vp));
 			} else plan.push(() => this.importNewFile(vp));
 		}
@@ -382,7 +453,7 @@ export class DiskMirror {
 		for (const e of this.index.all()) if (e.deleted && this.state.baselines[e.id] && !diskFiles.has(canonicalPath(e.path))) this.dropBaseline(e.id);
 
 		// 6. safety brake
-		const total = Math.max(1, [...byPath.values()].filter((e) => e.kind === "md").length);
+		const total = Math.max(1, [...byPath.values()].filter((e) => e.kind !== "folder").length);
 		const brake = this.opts.brake ?? { minFiles: 20, fraction: 0.25 };
 		const destructive = overwrites + deletes;
 		if (destructive > brake.minFiles && destructive / total > brake.fraction) {
@@ -410,11 +481,33 @@ export class DiskMirror {
 	private async peekFile(e: Entry, vp: string, base: Baseline | undefined, onDisk: boolean): Promise<"none" | "overwrite" | "delete"> {
 		if (!onDisk) return base ? "delete" : "none";
 		if (!base) return "none";
+		if (e.kind === "blob") {
+			const dh = await this.diskHash(vp, "blob");
+			return dh === base.hash && e.blob && e.blob.hash !== base.hash ? "overwrite" : "none";
+		}
 		const d = await this.vault.read(vp);
 		if (d === null || fingerprint(d) !== base.hash) return "none";
 		const seq = this.space.localSeq(e.id);
 		const head = this.space.heads.get(e.id) ?? seq;
 		return head > seq ? "overwrite" : "none";
+	}
+
+	private reconcileEntry(e: Entry, vp: string, base: Baseline | undefined): Promise<void> {
+		return e.kind === "blob" ? this.reconcileBlob(e, vp, base) : this.reconcileFile(e, vp, base);
+	}
+
+	/** Startup reconcile of a blob entry: detect offline deletes, then verify. */
+	private async reconcileBlob(e: Entry, vp: string, base: Baseline | undefined): Promise<void> {
+		if (base && !(await this.vault.exists(vp))) {
+			// Deleted while we were not running. A newer remote version beats the delete.
+			if (this.brakeEngaged) return;
+			if (!e.blob || e.blob.hash === base.hash) {
+				this.index.tombstone(e.id, LOCAL_ORIGIN);
+				this.dropBaseline(e.id);
+				return;
+			}
+		}
+		await this.verifyBlob(e.id);
 	}
 
 	/** Bring one live file entry and its disk file into agreement (three-way on baseline/disk/CRDT). */
@@ -541,6 +634,7 @@ export class DiskMirror {
 	}
 
 	private async onLocalWrite(vp: string): Promise<void> {
+		if (fileKind(vp) === "blob") return this.onLocalBlobWrite(vp);
 		const D = await this.vault.read(vp);
 		const rel = this.toRel(vp)!;
 		if (D === null) {
@@ -582,7 +676,57 @@ export class DiskMirror {
 		}
 	}
 
+	private async onLocalBlobWrite(vp: string): Promise<void> {
+		const rel = this.toRel(vp)!;
+		const D = await this.vault.readBinary(vp);
+		if (D === null) {
+			const gone = this.entryByPath(rel);
+			if (gone) this.touch(gone.id);
+			return;
+		}
+		if (this.consumeExpectedHash(vp, bytesFingerprint(D))) return;
+		const e = this.entryByPath(rel);
+		if (!e) return this.createBlobEntry(rel, D);
+		if (e.kind !== "blob") return;
+		if (!this.state.baselines[e.id]) {
+			// We never materialized this entry here: the file on disk is a different file.
+			await this.createBlobEntry(rel, D);
+			this.touch(e.id);
+			return;
+		}
+		this.touch(e.id); // verifyBlob decides: upload a local edit, or a conflict
+	}
+
+	private maxBlobBytes(): number {
+		return this.opts.maxBlobBytes?.() ?? DEFAULT_MAX_BLOB_BYTES;
+	}
+
+	private warnTooLarge(vp: string, size: number) {
+		if (this.tooLarge.has(vp)) return;
+		this.tooLarge.add(vp);
+		const mb = (n: number) => `${Math.round(n / 1024 / 1024)} MB`;
+		this.notices.emit({ kind: "error", message: `"${vp}" is ${mb(size)}, over this host's ${mb(this.maxBlobBytes())} limit, so it isn't synced.`, paths: [vp] });
+	}
+
+	/** Track a local non-Markdown file as a new entry; its upload happens in verifyBlob. */
+	private async createBlobEntry(rel: string, D: Uint8Array): Promise<void> {
+		if (D.length > this.maxBlobBytes()) return this.warnTooLarge(this.toVault(rel), D.length);
+		await this.ensureFolderEntries(rel);
+		const id = randomId();
+		this.index.create(id, rel, "blob", LOCAL_ORIGIN);
+		this.setBlobBaseline(id, rel, bytesFingerprint(D));
+		this.applyCollisionRenames();
+		this.touch(id);
+	}
+
 	private async importNewFile(vp: string): Promise<void> {
+		if (fileKind(vp) === "blob") {
+			const rel = this.toRel(vp)!;
+			const existing = this.entryByPath(rel);
+			if (existing && this.state.baselines[existing.id]) return this.onLocalBlobWrite(vp);
+			const D = await this.vault.readBinary(vp);
+			return D === null ? undefined : this.createBlobEntry(rel, D);
+		}
 		const D = await this.vault.read(vp);
 		if (D === null) return;
 		const rel = this.toRel(vp)!;
@@ -671,6 +815,12 @@ export class DiskMirror {
 			if (newIn) return kind === "folder" ? this.importFolderTree(newVp) : this.importNewFile(newVp);
 			return;
 		}
+		if (kind === "file" && e.kind !== "folder" && newRel !== null && fileKind(newRel) !== e.kind) {
+			// The extension changed between Markdown and other: a different kind of entry.
+			if (oldIn) await this.onLocalDelete(oldVp, kind);
+			if (newIn) await this.importNewFile(newVp);
+			return;
+		}
 		if (!newIn || newRel === null) {
 			// Moved out of the synced area: treat as delete.
 			if (oldIn) return this.onLocalDelete(oldVp, kind);
@@ -695,7 +845,7 @@ export class DiskMirror {
 			}
 		}, LOCAL_ORIGIN);
 		this.scheduleStateSave();
-		for (const id of movedIds) if (this.index.get(id)?.kind === "md") this.touch(id);
+		for (const id of movedIds) if (this.index.get(id)?.kind !== "folder") this.touch(id);
 	}
 
 	private async importFolderTree(vp: string) {
@@ -730,8 +880,12 @@ export class DiskMirror {
 		}
 		for (const r of renames) this.touch(r.id);
 		for (const e of byPath.values()) {
-			if (e.kind !== "md") continue;
+			if (e.kind === "folder") continue;
 			const base = this.state.baselines[e.id];
+			if (e.kind === "blob") {
+				if (!base || base.path !== e.path || (e.blob && e.blob.hash !== base.hash)) this.touch(e.id);
+				continue;
+			}
 			if (!base) this.fetchRemote(e.id); // new file from elsewhere
 			else if (base.path !== e.path) this.touch(e.id); // renamed elsewhere
 		}
@@ -761,17 +915,25 @@ export class DiskMirror {
 
 	private async handleRemoteDelete(e: Entry, vp: string): Promise<void> {
 		const base = this.state.baselines[e.id];
-		const D = await this.vault.read(vp);
-		if (D === null) {
+		const dh = await this.diskHash(vp, e.kind);
+		if (dh === null) {
 			this.dropBaseline(e.id);
 			return;
 		}
-		if (base && fingerprint(D) === base.hash) {
+		if (base && dh === base.hash) {
 			if (this.brakeEngaged) return;
 			await this.selfRemove(vp);
 			this.dropBaseline(e.id);
 			return;
 		}
+		if (base && e.kind === "blob") {
+			// Local edits since last sync beat the remote delete: revive; verifyBlob uploads them.
+			this.index.revive(e.id, this.toRel(vp)!, LOCAL_ORIGIN);
+			this.touch(e.id);
+			this.notices.emit({ kind: "preserved", message: `"${vp}" was deleted on another device but had local changes, so it was kept.`, paths: [vp] });
+			return;
+		}
+		const D = (await this.vault.read(vp)) ?? "";
 		if (base) {
 			// Local edits since last sync beat the remote delete: revive.
 			const rel = this.toRel(vp)!;
@@ -851,36 +1013,12 @@ export class DiskMirror {
 	 */
 	private async verifyFile(id: string): Promise<void> {
 		const e = this.index.get(id);
+		if (e?.kind === "blob") return this.verifyBlob(id);
 		if (!e || e.deleted || e.kind !== "md") return;
-		const { byPath } = this.index.resolvePaths();
-		if (byPath.get(canonicalPath(e.path))?.id !== id) return;
 		const vp = this.toVault(e.path);
 		if (this.isBound(vp)) return;
-		let base = this.state.baselines[id];
-		// Follow a rename made elsewhere.
-		if (base && base.path !== e.path) {
-			const oldVp = this.toVault(base.path);
-			const old = await this.vault.read(oldVp);
-			// Only move the old file if it is still ours (unchanged since last sync).
-			if (old !== null && fingerprint(old) === base.hash && !(await this.vault.exists(vp))) {
-				await this.selfRename(oldVp, vp);
-			}
-			base = { ...base, path: e.path };
-			this.state.baselines[id] = base;
-			this.scheduleStateSave();
-		}
-		// Another tracked file still sits at this path (e.g. a collision loser not yet moved away).
-		for (const [other, b] of Object.entries(this.state.baselines)) {
-			if (other === id || canonicalPath(b.path) !== canonicalPath(e.path)) continue;
-			const oe = this.index.get(other);
-			if (oe && !oe.deleted && canonicalPath(oe.path) !== canonicalPath(e.path)) {
-				await this.verifyFile(other); // moves it to its new path
-			}
-			if (canonicalPath(this.state.baselines[other]?.path ?? "") === canonicalPath(e.path) && this.index.get(other) && !this.index.get(other)!.deleted) {
-				this.touch(id); // still occupied; retry later
-				return;
-			}
-		}
+		const base = await this.locate(e);
+		if (base === false) return;
 		const doc = await this.space.acquire(id);
 		try {
 			const ytext = textOf(doc);
@@ -916,6 +1054,180 @@ export class DiskMirror {
 		} finally {
 			this.space.release(id);
 		}
+	}
+
+	/**
+	 * Shared verify prelude: make sure `e` owns its path, follow a rename made elsewhere, and wait
+	 * for any other tracked file still sitting at the path to move away. Returns the (updated)
+	 * baseline, or false if verification should stop for now.
+	 */
+	private async locate(e: Entry): Promise<Baseline | undefined | false> {
+		const id = e.id;
+		const { byPath } = this.index.resolvePaths();
+		if (byPath.get(canonicalPath(e.path))?.id !== id) return false;
+		const vp = this.toVault(e.path);
+		let base = this.state.baselines[id];
+		// Follow a rename made elsewhere.
+		if (base && base.path !== e.path) {
+			const oldVp = this.toVault(base.path);
+			// Only move the old file if it is still ours (unchanged since last sync).
+			if ((await this.diskHash(oldVp, e.kind)) === base.hash && !(await this.vault.exists(vp))) {
+				await this.selfRename(oldVp, vp);
+			}
+			base = { ...base, path: e.path };
+			this.state.baselines[id] = base;
+			this.scheduleStateSave();
+		}
+		// Another tracked file still sits at this path (e.g. a collision loser not yet moved away).
+		for (const [other, b] of Object.entries(this.state.baselines)) {
+			if (other === id || canonicalPath(b.path) !== canonicalPath(e.path)) continue;
+			const oe = this.index.get(other);
+			if (oe && !oe.deleted && canonicalPath(oe.path) !== canonicalPath(e.path)) {
+				await this.verifyFile(other); // moves it to its new path
+			}
+			if (canonicalPath(this.state.baselines[other]?.path ?? "") === canonicalPath(e.path) && this.index.get(other) && !this.index.get(other)!.deleted) {
+				this.touch(id); // still occupied; retry later
+				return false;
+			}
+		}
+		return base;
+	}
+
+	// ───────────── blobs ─────────────
+
+	/**
+	 * Bring a blob entry and its disk file into agreement. Like Markdown, but whole-file: a local
+	 * edit is uploaded and recorded; a remote version is downloaded and written; when both changed,
+	 * the remote version wins and the local one is kept as a local-only conflict copy.
+	 * Transfers run outside the queue and re-touch the entry when done.
+	 */
+	private async verifyBlob(id: string): Promise<void> {
+		const e = this.index.get(id);
+		if (!e || e.deleted || e.kind !== "blob" || !this.opts.blobs) return;
+		const vp = this.toVault(e.path);
+		const base = await this.locate(e);
+		if (base === false) return;
+		const C = e.blob ?? null;
+		const D = await this.vault.readBinary(vp);
+		const dh = D ? bytesFingerprint(D) : null;
+		if (!C) {
+			// First upload still pending: ours (we have the baseline) or another device's.
+			if (D && base) await this.commitLocalBlob(e, D, dh!);
+			return;
+		}
+		if (dh === C.hash) {
+			this.setBlobBaseline(id, e.path, dh);
+			this.uploaded.delete(dh);
+			return;
+		}
+		if (D === null) {
+			await this.writeRemoteBlob(e, C, null);
+			return;
+		}
+		if (!base) {
+			// A different local file sat at this path: keep it as a conflict copy.
+			if (!this.downloaded.has(C.id)) return this.startDownload(e.id, C);
+			await this.writeConflictCopyBinary(vp, D, "A different local file existed at this path");
+			await this.writeRemoteBlob(e, C, dh);
+			return;
+		}
+		if (dh === base.hash) {
+			// Disk is stale. If our version is nowhere in the entry's history, it was recorded
+			// concurrently with the winning one and lost the race: keep it as a conflict copy.
+			const known = (e.prev ?? []).some((r) => r.hash === dh);
+			if (!known) {
+				if (!this.downloaded.has(C.id)) return this.startDownload(e.id, C);
+				await this.writeConflictCopyBinary(vp, D, "This file was changed on another device too");
+			}
+			await this.writeRemoteBlob(e, C, dh);
+			return;
+		}
+		if (C.hash === base.hash) {
+			await this.commitLocalBlob(e, D, dh!); // local edit
+			return;
+		}
+		// Changed on both sides: last writer wins; keep ours locally.
+		if (!this.downloaded.has(C.id)) return this.startDownload(e.id, C);
+		await this.writeConflictCopyBinary(vp, D, "This file was changed on another device too");
+		await this.writeRemoteBlob(e, C, dh);
+	}
+
+	/** Write a downloaded version (compare-and-swap against `expected`), or start its download. */
+	private async writeRemoteBlob(e: Entry, C: BlobRef, expected: string | null): Promise<void> {
+		const bytes = this.downloaded.get(C.id);
+		if (!bytes) return this.startDownload(e.id, C);
+		await this.selfWriteBinary(this.toVault(e.path), bytes, expected);
+		this.setBlobBaseline(e.id, e.path, C.hash);
+	}
+
+	/** Record a local version once uploaded, or start its upload. */
+	private async commitLocalBlob(e: Entry, D: Uint8Array, dh: string): Promise<void> {
+		if (D.length > this.maxBlobBytes()) return this.warnTooLarge(this.toVault(e.path), D.length);
+		const ref = this.uploaded.get(dh);
+		if (!ref) return this.startUpload(e.id, D, dh);
+		this.index.setBlob(e.id, ref, LOCAL_ORIGIN);
+		this.setBlobBaseline(e.id, e.path, dh);
+		this.uploaded.delete(dh);
+	}
+
+	/** Run a transfer once per key; every entry waiting on it is re-verified when it ends. */
+	private transfer<T>(key: string, entryId: string, run: () => Promise<T>, done: (v: T) => void): void {
+		const waiting = this.inflight.get(key);
+		if (waiting) {
+			waiting.add(entryId);
+			return;
+		}
+		const ids = new Set([entryId]);
+		this.inflight.set(key, ids);
+		void this.transferSlots
+			.run(run)
+			.then((v) => {
+				done(v);
+				for (const id of ids) this.touch(id);
+			})
+			.catch((err) => {
+				log.warn(`blob transfer ${key} failed; will retry`, err);
+				for (const id of ids) this.scheduleRetry(id);
+			})
+			.finally(() => this.inflight.delete(key));
+	}
+
+	private startDownload(entryId: string, ref: BlobRef): void {
+		if (this.downloaded.has(ref.id) || !this.opts.blobs) return;
+		this.transfer(`d:${ref.id}`, entryId, () => this.opts.blobs!.download(this.space, ref), (bytes) => this.cacheDownload(ref.id, bytes));
+	}
+
+	/** Keep downloads until written; bounded so a big first sync doesn't hold everything in memory. */
+	private cacheDownload(id: string, bytes: Uint8Array) {
+		this.downloaded.set(id, bytes);
+		this.downloadedBytes += bytes.length;
+		for (const [old, b] of this.downloaded) {
+			if (this.downloadedBytes <= DOWNLOAD_CACHE_BYTES || old === id) break;
+			this.downloaded.delete(old);
+			this.downloadedBytes -= b.length;
+		}
+	}
+
+	private startUpload(entryId: string, D: Uint8Array, dh: string): void {
+		if (this.uploaded.has(dh) || !this.opts.blobs) return;
+		this.transfer(`u:${dh}`, entryId, () => this.opts.blobs!.upload(this.space, D), (ref) => this.uploaded.set(dh, ref));
+	}
+
+	private scheduleRetry(id: string): void {
+		if (this.stopped) return;
+		this.retryIds.add(id);
+		if (this.retryTimer) return;
+		this.retryTimer = setTimeout(() => {
+			this.retryTimer = null;
+			this.retryTransfers();
+		}, this.opts.retryMs ?? 30_000);
+	}
+
+	/** Retry failed blob transfers now (e.g. after reconnecting). */
+	retryTransfers(): void {
+		const ids = [...this.retryIds];
+		this.retryIds.clear();
+		for (const id of ids) this.touch(id);
 	}
 
 	/** After an editor closes, make sure disk catches up with the CRDT. */

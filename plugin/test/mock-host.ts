@@ -12,7 +12,8 @@ import {
 	type Update,
 } from "../src/proto/tezca/v1/sync_pb";
 import type { WSCtor, WSLike } from "../src/core/connection";
-import { bytesEqual, b64u, randomBytes, sigMsg, verify } from "../src/core/crypto";
+import { bytesEqual, b64u, fromB64u, randomBytes, sigMsg, verify } from "../src/core/crypto";
+import { httpResponse, type HttpFn } from "../src/core/setup";
 
 type ServerMsg = MessageInitShape<typeof ServerFrameSchema>["msg"];
 
@@ -42,6 +43,48 @@ export class MockHost {
 	latency = 0;
 	/** When true, every new connection is dropped immediately (server unreachable). */
 	down = false;
+
+	/** Encrypted blobs by `${spaceId}/${blobId}`. */
+	blobs = new Map<string, Uint8Array>();
+	maxBlobBytes = 8 * 1024 * 1024;
+	/** Count of blob PUTs that stored new bytes (for dedup assertions). */
+	blobPuts = 0;
+
+	/** An HttpFn serving the blob endpoints and /api/info (protocol.md "HTTP API"). */
+	get http(): HttpFn {
+		return async ({ method, url, headers, body }) => {
+			await new Promise((r) => setTimeout(r, this.latency));
+			if (this.down) throw new Error("network down");
+			const path = url.replace(/^https?:\/\/[^/]+/, "");
+			const json = (status: number, v: unknown) => httpResponse(status, new TextEncoder().encode(JSON.stringify(v)));
+			if (method === "GET" && path === "/api/info")
+				return json(200, { server_id: this.serverId, protocol_version: 1, claimed: true, max_blob_bytes: this.maxBlobBytes });
+			const m = /^\/api\/spaces\/([^/]+)\/blobs\/([^/]+)$/.exec(path);
+			if (!m) return json(404, { error: "not found" });
+			const [, spaceId, blobId] = m.map(decodeURIComponent);
+			const raw = typeof body === "string" ? new TextEncoder().encode(body) : (body ?? new Uint8Array());
+			// Verify the HTTP signature like the real server.
+			const a = /pk=([^,]+), ts=(\d+), sig=(.+)$/.exec(headers["Authorization"] ?? "");
+			if (!a || !verify(fromB64u(a[1]), sigMsg.http(method, path, Number(a[2]), raw), fromB64u(a[3]))) return json(401, { error: "bad signature" });
+			const member = this.spaces.get(spaceId)?.members.get(a[1]);
+			if (!member) return json(403, { error: "not a member" });
+			const key = `${spaceId}/${blobId}`;
+			if (method === "HEAD") return httpResponse(this.blobs.has(key) ? 200 : 404, new Uint8Array());
+			if (method === "GET") {
+				const b = this.blobs.get(key);
+				return b ? httpResponse(200, b.slice()) : json(404, { error: "no such blob" });
+			}
+			if (method === "PUT") {
+				if (member.role !== SpaceRole.OWNER && member.role !== SpaceRole.EDITOR) return json(403, { error: "read-only" });
+				if (raw.length > this.maxBlobBytes + 40) return json(413, { error: "too large" });
+				if (this.blobs.has(key)) return json(200, { size: this.blobs.get(key)!.length });
+				this.blobs.set(key, raw.slice());
+				this.blobPuts++;
+				return json(201, { size: raw.length });
+			}
+			return json(405, { error: "method" });
+		};
+	}
 
 	addUser(signPk: Uint8Array, boxPk: Uint8Array) {
 		this.users.set(b64u(signPk), { signPk, boxPk });

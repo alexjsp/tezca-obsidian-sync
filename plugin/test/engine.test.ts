@@ -210,10 +210,10 @@ describe("sync engine (mock host)", () => {
 		expect(b.vault.files.get("offline.md")).toBe("made offline");
 	});
 
-	it("ignores hidden folders and non-markdown files", async () => {
+	it("ignores hidden folders", async () => {
 		const { a, b } = await pair({ a: { ".obsidian/app.json": "{}", "img.png": "binary", "ok.md": "ok" } });
 		await converged(a, b);
-		expect([...b.vault.files.keys()]).toEqual(["ok.md"]);
+		expect([...b.vault.files.keys()].sort()).toEqual(["img.png", "ok.md"]);
 	});
 
 	it("compacts long histories into snapshots and new devices load from them", async () => {

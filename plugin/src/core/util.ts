@@ -56,3 +56,21 @@ export class KeyedQueue {
 export function sleep(ms: number): Promise<void> {
 	return new Promise((r) => setTimeout(r, ms));
 }
+
+/** Limits how many async tasks run at once. */
+export class Semaphore {
+	private waiting: (() => void)[] = [];
+	private active = 0;
+	constructor(private readonly max: number) {}
+
+	async run<T>(fn: () => Promise<T>): Promise<T> {
+		if (this.active >= this.max) await new Promise<void>((r) => this.waiting.push(r));
+		this.active++;
+		try {
+			return await fn();
+		} finally {
+			this.active--;
+			this.waiting.shift()?.();
+		}
+	}
+}

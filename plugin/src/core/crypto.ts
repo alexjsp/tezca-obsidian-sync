@@ -115,6 +115,11 @@ export function fingerprint(text: string): string {
 	return hex(s().crypto_generichash(16, utf8(text), null));
 }
 
+/** fingerprint() for raw bytes. fingerprint(text) === bytesFingerprint(utf8(text)). */
+export function bytesFingerprint(data: Uint8Array): string {
+	return hex(s().crypto_generichash(16, data, null));
+}
+
 // ───────────── identity ─────────────
 
 export interface Identity {
@@ -199,6 +204,7 @@ export const ad = {
 	awareness: (space: string, doc: string, epoch: number) => sigInput("ad-awareness", space, doc, u32(epoch)),
 	meta: (space: string, epoch: number) => sigInput("ad-meta", space, u32(epoch)),
 	pairing: () => sigInput("ad-pairing"),
+	blob: (space: string, blobId: string, epoch: number) => sigInput("ad-blob", space, blobId, u32(epoch)),
 };
 
 export const sigMsg = {
@@ -233,4 +239,22 @@ export function sealPairing(secret: Uint8Array, p: PairingPayload): Uint8Array {
 
 export function openPairing(secret: Uint8Array, ct: Uint8Array): PairingPayload {
 	return JSON.parse(fromUtf8(open(pairingKey(secret), ct, ad.pairing()))) as PairingPayload;
+}
+
+// ───────────── blobs ─────────────
+
+/** Keyed content address of a blob (b64u, 43 chars). See protocol.md "Encrypted payloads". */
+export function blobId(spaceKey: Uint8Array, plaintext: Uint8Array): string {
+	return b64u(blake2b256(blake2b256(spaceKey, "tezca/v1/blob-id"), plaintext));
+}
+
+export function sealBlob(spaceKey: Uint8Array, spaceId: string, id: string, epoch: number, plaintext: Uint8Array): Uint8Array {
+	return seal(spaceKey, plaintext, ad.blob(spaceId, id, epoch));
+}
+
+/** Decrypts and checks the content address; throws if either fails. */
+export function openBlob(spaceKey: Uint8Array, spaceId: string, id: string, epoch: number, payload: Uint8Array): Uint8Array {
+	const plain = open(spaceKey, payload, ad.blob(spaceId, id, epoch));
+	if (blobId(spaceKey, plain) !== id) throw new Error(`blob ${id} content does not match its id`);
+	return plain;
 }

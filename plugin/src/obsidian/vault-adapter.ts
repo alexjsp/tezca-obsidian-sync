@@ -35,6 +35,29 @@ export class ObsidianVault implements VaultAdapter {
 		await this.vault.create(p, content);
 	}
 
+	async readBinary(path: string): Promise<Uint8Array | null> {
+		const f = this.vault.getAbstractFileByPath(normalizePath(path));
+		if (!(f instanceof TFile)) return null;
+		return new Uint8Array(await this.vault.readBinary(f));
+	}
+
+	async writeBinary(path: string, data: Uint8Array): Promise<void> {
+		const p = normalizePath(path);
+		const buf = data.slice().buffer;
+		const f = this.vault.getAbstractFileByPath(p);
+		if (f instanceof TFile) {
+			await this.vault.modifyBinary(f, buf);
+			return;
+		}
+		await this.ensureParent(p);
+		await this.vault.createBinary(p, buf);
+	}
+
+	async size(path: string): Promise<number | null> {
+		const f = this.vault.getAbstractFileByPath(normalizePath(path));
+		return f instanceof TFile ? f.stat.size : null;
+	}
+
 	async mkdir(path: string): Promise<void> {
 		const p = normalizePath(path);
 		if (this.vault.getAbstractFileByPath(p)) return;

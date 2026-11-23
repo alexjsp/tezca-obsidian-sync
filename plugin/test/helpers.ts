@@ -1,5 +1,5 @@
 import { HostConnection } from "../src/core/connection";
-import { identityFromSeed, randomBytes, type Identity } from "../src/core/crypto";
+import { bytesFingerprint, identityFromSeed, randomBytes, type Identity } from "../src/core/crypto";
 import { SyncEngine } from "../src/core/engine";
 import { createRootSpace, waitOnline } from "../src/core/setup";
 import { MemoryStore } from "../src/core/store";
@@ -47,6 +47,8 @@ export async function startClient(
 		WebSocketImpl: host.WebSocket,
 		startupWaitMs,
 		isBound,
+		http: host.http,
+		blobRetryMs: 200,
 	});
 	await engine.start();
 	return { name, vault, store, engine };
@@ -63,7 +65,11 @@ export async function eventually(fn: () => boolean | Promise<boolean>, timeoutMs
 
 export function snapshotVault(v: MemoryVault): Record<string, string> {
 	const out: Record<string, string> = {};
-	for (const [p, c] of [...v.files].sort()) if (p.endsWith(".md") && !p.includes("(conflict")) out[p] = c;
+	for (const [p, c] of [...v.files].sort()) {
+		if (p.includes("(conflict") || p.split("/").some((seg) => seg.startsWith("."))) continue;
+		if (p.endsWith(".md")) out[p] = typeof c === "string" ? c : new TextDecoder().decode(c);
+		else out[p] = `bin:${bytesFingerprint(typeof c === "string" ? new TextEncoder().encode(c) : c)}`;
+	}
 	return out;
 }
 

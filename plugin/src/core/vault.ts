@@ -15,6 +15,12 @@ export interface VaultAdapter {
 	read(path: string): Promise<string | null>;
 	/** Create or overwrite a file, creating parent folders as needed. */
 	write(path: string, content: string): Promise<void>;
+	/** Raw file bytes, or null if it does not exist. */
+	readBinary(path: string): Promise<Uint8Array | null>;
+	/** Create or overwrite a file with raw bytes, creating parent folders as needed. */
+	writeBinary(path: string, data: Uint8Array): Promise<void>;
+	/** File size in bytes, or null if it does not exist. */
+	size(path: string): Promise<number | null>;
 	mkdir(path: string): Promise<void>;
 	/** Delete a file (to trash where supported) or an empty folder. */
 	remove(path: string): Promise<void>;
@@ -25,7 +31,8 @@ export interface VaultAdapter {
 
 /** In-memory vault used by tests and the simulator. Emits events asynchronously like Obsidian. */
 export class MemoryVault implements VaultAdapter {
-	files = new Map<string, string>();
+	/** Text files hold strings; binary files written with writeBinary hold bytes. */
+	files = new Map<string, string | Uint8Array>();
 	folders = new Set<string>();
 	private listeners = new Set<(e: VaultEvent) => void>();
 
@@ -52,10 +59,25 @@ export class MemoryVault implements VaultAdapter {
 			...[...this.files.keys()].map((path) => ({ path, kind: "file" as const })),
 		];
 	}
-	async read(path: string) {
-		return this.files.get(path) ?? null;
+	async read(path: string): Promise<string | null> {
+		const v = this.files.get(path);
+		return v === undefined ? null : typeof v === "string" ? v : new TextDecoder().decode(v);
+	}
+	async readBinary(path: string): Promise<Uint8Array | null> {
+		const v = this.files.get(path);
+		return v === undefined ? null : typeof v === "string" ? new TextEncoder().encode(v) : v.slice();
+	}
+	async size(path: string): Promise<number | null> {
+		const b = await this.readBinary(path);
+		return b ? b.length : null;
 	}
 	async write(path: string, content: string) {
+		this.put(path, content);
+	}
+	async writeBinary(path: string, data: Uint8Array) {
+		this.put(path, data.slice());
+	}
+	private put(path: string, content: string | Uint8Array) {
 		this.ensureParents(path);
 		const existed = this.files.has(path);
 		this.files.set(path, content);
@@ -113,5 +135,8 @@ export class MemoryVault implements VaultAdapter {
 	// ── "user" operations for tests/sim: same as above but named for intent ──
 	userWrite(path: string, content: string) {
 		return this.write(path, content);
+	}
+	userWriteBinary(path: string, data: Uint8Array) {
+		return this.writeBinary(path, data);
 	}
 }

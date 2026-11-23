@@ -22,21 +22,41 @@ export interface HttpResponse {
 	status: number;
 	json: unknown;
 	text: string;
+	/** Raw response body. */
+	bytes: Uint8Array;
 }
-export type HttpFn = (req: { method: string; url: string; headers: Record<string, string>; body?: string }) => Promise<HttpResponse>;
+export interface HttpRequest {
+	method: string;
+	url: string;
+	headers: Record<string, string>;
+	body?: string | Uint8Array;
+}
+export type HttpFn = (req: HttpRequest) => Promise<HttpResponse>;
 
-/** Default HTTP using global fetch (tests, simulator). Obsidian supplies `requestUrl`. */
-export const fetchHttp: HttpFn = async ({ method, url, headers, body }) => {
-	const res = await fetch(url, { method, headers, body });
-	const text = await res.text();
+/** Build an HttpResponse from a raw body. */
+export function httpResponse(status: number, bytes: Uint8Array): HttpResponse {
+	const text = new TextDecoder().decode(bytes);
 	let json: unknown = null;
 	try {
 		json = text ? JSON.parse(text) : null;
 	} catch {
 		/* not json */
 	}
-	return { status: res.status, json, text };
+	return { status, json, text, bytes };
+}
+
+/** Default HTTP using global fetch (tests, simulator). Obsidian supplies `requestUrl`. */
+export const fetchHttp: HttpFn = async ({ method, url, headers, body }) => {
+	const res = await fetch(url, { method, headers, body: body as BodyInit | undefined });
+	return httpResponse(res.status, new Uint8Array(await res.arrayBuffer()));
 };
+
+/** `Authorization` header value for a signed HTTP request (protocol.md "HTTP API"). */
+export function httpAuth(identity: Identity, method: string, pathWithQuery: string, body: Uint8Array): string {
+	const ts = Math.floor(Date.now() / 1000);
+	const sig = sign(identity, sigMsg.http(method, pathWithQuery, ts, body));
+	return `Tezca pk=${b64u(identity.signPk)}, ts=${ts}, sig=${b64u(sig)}`;
+}
 
 export class HttpError extends Error {
 	constructor(
@@ -58,6 +78,8 @@ export interface ServerInfo {
 	protocol_version: number;
 	claimed: boolean;
 	name?: string;
+	/** Largest blob plaintext the host accepts (M2+). */
+	max_blob_bytes?: number;
 }
 
 export class HostApi {
@@ -70,11 +92,7 @@ export class HostApi {
 		const bodyStr = body === undefined ? "" : JSON.stringify(body);
 		const headers: Record<string, string> = {};
 		if (body !== undefined) headers["Content-Type"] = "application/json";
-		if (identity) {
-			const ts = Math.floor(Date.now() / 1000);
-			const sig = sign(identity, sigMsg.http(method, path, ts, utf8(bodyStr)));
-			headers["Authorization"] = `Tezca pk=${b64u(identity.signPk)}, ts=${ts}, sig=${b64u(sig)}`;
-		}
+		if (identity) headers["Authorization"] = httpAuth(identity, method, path, utf8(bodyStr));
 		const res = await this.http({ method, url: this.host + path, headers, body: body === undefined ? undefined : bodyStr });
 		if (res.status < 200 || res.status >= 300) {
 			const msg = (res.json as { error?: string } | null)?.error ?? res.text ?? `HTTP ${res.status}`;
