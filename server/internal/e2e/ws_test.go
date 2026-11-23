@@ -224,7 +224,8 @@ func TestWSSyncFlow(t *testing.T) {
 		a.snapshot(uint32(60+i), space, doc, base, 0, []byte("x"))
 		a.expectError(uint32(60+i), pb.ErrorCode_ERROR_CODE_CONFLICT)
 	}
-	// Retention: keep last 3.
+	// Retention (the hub clock stands still): only the newest snapshot of the hour survives.
+	// TestWSHistory covers the policy across hours and days.
 	for i, base := range []uint64{405, 410, 415} {
 		a.snapshot(uint32(70+i), space, doc, base, 0, []byte("s"))
 		if a.recv().GetSnapshotAck() == nil {
@@ -233,7 +234,7 @@ func TestWSSyncFlow(t *testing.T) {
 		a.recv() // DocHeads
 	}
 	got, _ := e.st.SnapshotSeqs(context.Background(), space, doc)
-	if !reflect.DeepEqual(got, []uint64{405, 410, 415}) {
+	if !reflect.DeepEqual(got, []uint64{415}) {
 		t.Fatalf("retained %v", got)
 	}
 
@@ -471,4 +472,95 @@ func mustChallenge(t *testing.T, data []byte) *pb.Challenge {
 		t.Fatalf("challenge: %v %v", f, err)
 	}
 	return f.GetChallenge()
+}
+
+// TestWSHistory covers snapshot timestamps, retention with a fake clock, ListVersions and
+// GetVersion.
+func TestWSHistory(t *testing.T) {
+	e := newEnv(t, nil)
+	admin := newIdent()
+	e.claim(admin)
+	a := e.dial(admin, "a")
+	space, doc := randSpaceID(), "doc1"
+	a.createSpace(1, space)
+	for i := uint32(1); i <= 10; i++ {
+		a.push(i, space, doc, 0, []byte{byte(i)})
+		if ack := a.recv().GetAck(); ack == nil || ack.Seq != uint64(i) {
+			t.Fatalf("ack %d: %v", i, ack)
+		}
+	}
+	if _, _, done := e.dial(admin, "b").syncDoc(space, doc, 0); done.SnapshotCreatedAt != 0 {
+		t.Fatalf("snapshot_created_at without a snapshot: %v", done)
+	}
+
+	t0 := time.Date(2026, 11, 1, 1, 0, 0, 0, time.UTC)
+	snap := func(ref uint32, base uint64, at time.Time) {
+		t.Helper()
+		e.clock.Set(at)
+		a.snapshot(ref, space, doc, base, 0, []byte(fmt.Sprintf("snapshot@%d", base)))
+		ack := a.recv().GetSnapshotAck()
+		if ack == nil || ack.Ref != ref || ack.BaseSeq != base || ack.CreatedAt != at.UnixMilli() {
+			t.Fatalf("snapshot ack: %v", ack)
+		}
+	}
+	snap(20, 2, t0)
+	snap(21, 4, t0.Add(30*time.Minute)) // same hour as 2: replaces it
+	snap(22, 6, t0.Add(time.Hour))
+	snap(23, 8, t0.Add(25*time.Hour)) // 4 is now outside the 24 h window and not the newest of its day
+	got, _ := e.st.SnapshotSeqs(context.Background(), space, doc)
+	if !reflect.DeepEqual(got, []uint64{6, 8}) {
+		t.Fatalf("retained %v", got)
+	}
+	if _, _, done := e.dial(admin, "c").syncDoc(space, doc, 0); done.SnapshotCreatedAt != t0.Add(25*time.Hour).UnixMilli() {
+		t.Fatalf("snapshot_created_at: %v", done)
+	}
+
+	// ListVersions: newest first. Viewers may read history.
+	viewer := e.join(admin, "guest")
+	e.st.AddMember(context.Background(), space, viewer.pk, store.SpaceViewer, []byte("w"))
+	v := e.dial(viewer, "v")
+	v.send(&pb.ClientFrame{Msg: &pb.ClientFrame_ListVersions{ListVersions: &pb.ListVersions{Rid: 30, SpaceId: space, DocId: doc}}})
+	list := v.recv().GetVersionList()
+	if list == nil || list.Rid != 30 || list.SpaceId != space || list.DocId != doc || len(list.Versions) != 2 {
+		t.Fatalf("version list: %v", list)
+	}
+	for i, want := range []struct {
+		base uint64
+		at   time.Time
+	}{{8, t0.Add(25 * time.Hour)}, {6, t0.Add(time.Hour)}} {
+		vi := list.Versions[i]
+		if vi.BaseSeq != want.base || vi.CreatedAt != want.at.UnixMilli() || !bytes.Equal(vi.Author, admin.pk) ||
+			vi.Size != uint64(len(fmt.Sprintf("snapshot@%d", want.base))) || vi.Epoch != 0 {
+			t.Fatalf("version %d: %v", i, vi)
+		}
+	}
+	v.send(&pb.ClientFrame{Msg: &pb.ClientFrame_ListVersions{ListVersions: &pb.ListVersions{Rid: 31, SpaceId: space, DocId: "never-written"}}})
+	if l := v.recv().GetVersionList(); l == nil || l.Rid != 31 || len(l.Versions) != 0 {
+		t.Fatalf("empty version list: %v", l)
+	}
+
+	// GetVersion returns the uploader's signed snapshot.
+	v.send(&pb.ClientFrame{Msg: &pb.ClientFrame_GetVersion{GetVersion: &pb.GetVersion{Rid: 32, SpaceId: space, DocId: doc, BaseSeq: 6}}})
+	vd := v.recv().GetVersionData()
+	if vd == nil || vd.Rid != 32 || vd.Info.BaseSeq != 6 || vd.Info.CreatedAt != t0.Add(time.Hour).UnixMilli() ||
+		string(vd.Payload) != "snapshot@6" || vd.Info.Size != uint64(len(vd.Payload)) ||
+		!sigs.Verify(vd.Info.Author, sigs.Snapshot(space, doc, vd.Info.BaseSeq, vd.Info.Epoch, vd.Payload), vd.Sig) {
+		t.Fatalf("version data: %v", vd)
+	}
+	for i, base := range []uint64{2, 4, 7, 0} { // pruned or never existed
+		rid := uint32(40 + i)
+		v.send(&pb.ClientFrame{Msg: &pb.ClientFrame_GetVersion{GetVersion: &pb.GetVersion{Rid: rid, SpaceId: space, DocId: doc, BaseSeq: base}}})
+		if err := v.expectError(rid, pb.ErrorCode_ERROR_CODE_NOT_FOUND); err.SpaceId != space || err.DocId != doc {
+			t.Fatalf("error ids: %v", err)
+		}
+	}
+
+	// Membership and ids.
+	o := e.dial(e.join(admin, "member"), "o")
+	o.send(&pb.ClientFrame{Msg: &pb.ClientFrame_ListVersions{ListVersions: &pb.ListVersions{Rid: 50, SpaceId: space, DocId: doc}}})
+	o.expectError(50, pb.ErrorCode_ERROR_CODE_FORBIDDEN)
+	o.send(&pb.ClientFrame{Msg: &pb.ClientFrame_GetVersion{GetVersion: &pb.GetVersion{Rid: 51, SpaceId: space, DocId: doc, BaseSeq: 8}}})
+	o.expectError(51, pb.ErrorCode_ERROR_CODE_FORBIDDEN)
+	v.send(&pb.ClientFrame{Msg: &pb.ClientFrame_ListVersions{ListVersions: &pb.ListVersions{Rid: 52, SpaceId: space, DocId: "a/b"}}})
+	v.expectError(52, pb.ErrorCode_ERROR_CODE_BAD_REQUEST)
 }

@@ -16,11 +16,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	"tezca/server/internal/api"
+	"tezca/server/internal/blobs"
 	"tezca/server/internal/store"
 	"tezca/server/internal/ws"
 )
@@ -30,6 +33,49 @@ func env(k, def string) string {
 		return v
 	}
 	return def
+}
+
+// envInt reads a non-negative integer env var.
+func envInt(k string, def int) (int, error) {
+	v := os.Getenv(k)
+	if v == "" {
+		return def, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("%s must be a non-negative integer, got %q", k, v)
+	}
+	return n, nil
+}
+
+// openBlobs returns the S3 blob store when TEZCA_S3_BUCKET is set, otherwise the filesystem one
+// under dataDir/blobs.
+func openBlobs(ctx context.Context, dataDir string) (blobs.BlobStore, string, error) {
+	bucket := os.Getenv("TEZCA_S3_BUCKET")
+	if bucket == "" {
+		dir := filepath.Join(dataDir, "blobs")
+		fs, err := blobs.NewFS(dir)
+		return fs, dir, err
+	}
+	cfg := blobs.S3Config{
+		Endpoint:  os.Getenv("TEZCA_S3_ENDPOINT"),
+		AccessKey: os.Getenv("TEZCA_S3_ACCESS_KEY"),
+		SecretKey: os.Getenv("TEZCA_S3_SECRET_KEY"),
+		Region:    os.Getenv("TEZCA_S3_REGION"),
+		Bucket:    bucket,
+		Prefix:    os.Getenv("TEZCA_S3_PREFIX"),
+		Insecure:  os.Getenv("TEZCA_S3_INSECURE") == "1",
+	}
+	s3, err := blobs.NewS3(cfg)
+	if err != nil {
+		return nil, "", err
+	}
+	cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	if err := s3.Check(cctx); err != nil {
+		return nil, "", err
+	}
+	return s3, "s3://" + cfg.Endpoint + "/" + bucket + "/" + cfg.Prefix, nil
 }
 
 func main() {
@@ -88,26 +134,48 @@ func run() error {
 	listen := env("TEZCA_LISTEN", ":8080")
 	publicURL := strings.TrimRight(os.Getenv("TEZCA_PUBLIC_URL"), "/")
 	name := env("TEZCA_SERVER_NAME", "Tezca")
+	maxBlobMB, err := envInt("TEZCA_MAX_BLOB_MB", 100)
+	if err != nil {
+		return err
+	}
+	if maxBlobMB == 0 {
+		return fmt.Errorf("TEZCA_MAX_BLOB_MB must be at least 1")
+	}
+	var history store.History
+	if history.Hours, err = envInt("TEZCA_HISTORY_HOURS", store.DefaultHistory.Hours); err != nil {
+		return err
+	}
+	if history.Days, err = envInt("TEZCA_HISTORY_DAYS", store.DefaultHistory.Days); err != nil {
+		return err
+	}
 
 	st, err := store.Open(dataDir)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
 	defer st.Close()
+	st.SetHistory(history)
 	ctx := context.Background()
+	blobStore, blobLoc, err := openBlobs(ctx, dataDir)
+	if err != nil {
+		return fmt.Errorf("open blob store: %w", err)
+	}
 	serverID, claimed, code, err := st.Init(ctx, os.Getenv("TEZCA_CLAIM_CODE"))
 	if err != nil {
 		return fmt.Errorf("init store: %w", err)
 	}
 
 	hub := ws.NewHub(ws.Config{Store: st, ServerID: serverID, Logger: log})
-	handler := api.New(api.Config{Store: st, Hub: hub, ServerID: serverID, PublicURL: publicURL, Name: name, Logger: log})
+	handler := api.New(api.Config{
+		Store: st, Hub: hub, ServerID: serverID, PublicURL: publicURL, Name: name, Logger: log,
+		Blobs: blobStore, MaxBlobBytes: int64(maxBlobMB) << 20,
+	})
 
 	ln, err := net.Listen("tcp", listen)
 	if err != nil {
 		return err
 	}
-	log.Info("tezca-server listening", "addr", ln.Addr().String(), "data", dataDir, "server_id", serverID)
+	log.Info("tezca-server listening", "addr", ln.Addr().String(), "data", dataDir, "blobs", blobLoc, "server_id", serverID)
 	if !claimed {
 		base := publicURL
 		if base == "" {

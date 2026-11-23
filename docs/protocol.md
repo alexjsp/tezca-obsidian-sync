@@ -99,7 +99,7 @@ any `Origin` (Obsidian connects from `app://obsidian.md`, `capacitor://localhost
 because authentication is by signature, never by cookies.
 
 HTTP errors return a JSON body `{"error": "..."}` with status 400 (bad input), 401 (bad, missing or
-skewed signature, or unknown user), 403 (not admin or wrong claim code), 404 (unknown invite or
+skewed signature, or unknown user), 403 (not admin, wrong claim code, or not a member of the space / not allowed to write), 404 (unknown invite or
 pairing), 409 (already claimed, or invite redeemed by another key), 410 (invite expired) or
 413 (too large).
 

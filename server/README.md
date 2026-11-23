@@ -33,12 +33,28 @@ For Docker, see [`deploy/README.md`](../deploy/README.md).
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `TEZCA_DATA_DIR` | `./data` | Directory for `tezca.db` (SQLite, WAL). |
+| `TEZCA_DATA_DIR` | `./data` | Directory for `tezca.db` (SQLite, WAL) and, with the filesystem blob store, `blobs/`. |
 | `TEZCA_LISTEN` | `:8080` | Listen address (plain HTTP). |
 | `TEZCA_PUBLIC_URL` | (unset) | Public base URL used in claim and invite links. If unset, the URL comes from `X-Forwarded-Proto`/`X-Forwarded-Host`/`Host`. |
 | `TEZCA_SERVER_NAME` | `Tezca` | Display name on the setup pages and in `/api/info`. |
 | `TEZCA_CLAIM_CODE` | (random) | Presets the claim code while the server is unclaimed. |
 | `TEZCA_DEBUG` | (unset) | Any value enables debug logging. |
+| `TEZCA_MAX_BLOB_MB` | `100` | Largest attachment (plaintext MiB). Uploads over this + 40 bytes of encryption overhead get 413. Shown to clients as `max_blob_bytes` in `/api/info`. |
+| `TEZCA_HISTORY_HOURS` | `24` | Version history: keep the newest snapshot per clock hour for this many hours. |
+| `TEZCA_HISTORY_DAYS` | `30` | Version history: keep the newest snapshot per UTC day for this many days. The latest snapshot is always kept. |
+
+Attachments (blobs) are stored on the filesystem under `$TEZCA_DATA_DIR/blobs/` unless
+`TEZCA_S3_BUCKET` is set, in which case they go to an S3-compatible bucket (AWS S3, MinIO, R2, B2, …).
+The bucket must already exist; the server checks it at startup. The server never deletes blobs.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `TEZCA_S3_BUCKET` | (unset) | Bucket name. Setting it enables the S3 blob store. |
+| `TEZCA_S3_ENDPOINT` | (required) | `host[:port]`, e.g. `s3.eu-west-1.amazonaws.com` or `minio:9000`. |
+| `TEZCA_S3_ACCESS_KEY` / `TEZCA_S3_SECRET_KEY` | | Credentials. |
+| `TEZCA_S3_REGION` | (auto) | Region, if the provider needs one. |
+| `TEZCA_S3_PREFIX` | (empty) | Key prefix. Objects are stored as `<prefix>blobs/<space_id>/<blob_id>`. |
+| `TEZCA_S3_INSECURE` | (unset) | `1` uses plain HTTP to the endpoint. |
 
 While unclaimed, the claim URL `<public>/claim?code=…` is logged on every start.
 
@@ -49,7 +65,8 @@ While unclaimed, the claim URL `<public>/claim?code=…` is logged on every star
 ```
 cmd/tezca-server   main: config, startup banner, graceful shutdown, healthcheck subcommand
 internal/sigs      sigInput construction + Ed25519 verification (golden-vector tested)
-internal/store     SQLite schema, migrations, all queries (single writer conn + read pool)
+internal/store     SQLite schema, migrations, all queries (single writer conn + read pool), snapshot retention
+internal/blobs     blob byte storage: filesystem (temp file + rename) and S3 (minio-go)
 internal/ws        WebSocket sessions, hub, per-doc ordering, space feeds
 internal/api       HTTP API, signed-request auth, CORS, claim/landing pages, QR
 internal/pb        generated protobuf code (proto/gen.sh)
@@ -74,10 +91,16 @@ go test -race ./...
 
 - `internal/sigs`: rebuilds every case in `proto/vectors/sig-vectors.json` and verifies the
   libsodium signatures with `crypto/ed25519`.
-- `internal/store`: claim, users, invites, pairings, spaces, updates, snapshots, prune and retention.
+- `internal/store`: claim, users, invites, pairings, spaces, updates, snapshots, prune, the
+  hourly/daily retention policy, versions, the blob index, and upgrading an M1 database.
+- `internal/blobs`: the same contract test against the filesystem store and the S3 store (backed
+  by an in-process [gofakes3](https://github.com/johannesboyne/gofakes3) server), including
+  uploads that fail at EOF never becoming visible.
 - `internal/e2e`: claim and setup pages, HTTP signature auth (including clock skew), CORS,
   invites/redeem, single-use pairings, and the full WebSocket flow. That covers concurrent pushes
   from two connections with strict per-connection ordering, Acks, broadcast to others only,
   DocHeads, resubscribe, batching, snapshot + prune + subscribe-from-0, error paths
   (FORBIDDEN, EPOCH_STALE, UNAUTHORIZED, TOO_LARGE, UPDATE_REQUIRED), idle timeout, and
-  slow-consumer disconnects.
+  slow-consumer disconnects. Blob PUT/GET/HEAD: signature auth over the streamed body, roles,
+  id validation, the size limit (with and without `Content-Length`) and idempotent re-uploads.
+  History: snapshot timestamps, retention under a fake clock, `ListVersions` and `GetVersion`.

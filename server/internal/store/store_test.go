@@ -219,8 +219,9 @@ func TestSpacesAndDocs(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// All created at the same instant: retention keeps only the newest (TestRetention covers more).
 	seqs, _ := s.SnapshotSeqs(ctx, sp, "index")
-	if !reflect.DeepEqual(seqs, []uint64{6, 8, 10}) {
+	if !reflect.DeepEqual(seqs, []uint64{10}) {
 		t.Fatalf("retained snapshots: %v", seqs)
 	}
 	sn, err := s.LatestSnapshot(ctx, sp, "index")

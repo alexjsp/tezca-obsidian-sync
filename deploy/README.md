@@ -1,7 +1,7 @@
 # Deploying Tezca
 
 The server is one static binary in a distroless, non-root image. It speaks **plain HTTP on port
-8080** and keeps everything (SQLite database) in the `/data` volume. TLS is the job of whatever
+8080** and keeps everything (SQLite database and attachments) in the `/data` volume. TLS is the job of whatever
 sits in front of it. Pick one of the recipes below.
 
 | File | Use it when | TLS |
@@ -45,7 +45,8 @@ TEZCA_PUBLIC_URL=http://192.168.1.10:8080 docker compose up -d
 Use this only on a network you trust. Content is end-to-end encrypted, but plain HTTP still exposes
 metadata (who syncs which doc, and when) to anyone on the path. Obsidian mobile may also refuse
 non-HTTPS hosts. If you already run nginx or Traefik, point it at `:8080` and make sure it forwards
-WebSocket upgrades on `/ws`.
+WebSocket upgrades on `/ws` and allows attachment-sized request bodies (nginx defaults to 1 MB:
+set `client_max_body_size` to a little over `TEZCA_MAX_BLOB_MB`).
 
 ## Caddy with automatic HTTPS (`compose.caddy.yml`)
 
@@ -90,6 +91,9 @@ Works behind NAT or CGNAT, with no inbound ports.
 TUNNEL_TOKEN=… TEZCA_DOMAIN=notes.example.com docker compose -f compose.cloudflared.yml up -d
 ```
 
+Cloudflare's Free and Pro plans reject request bodies over 100 MB, so set `TEZCA_MAX_BLOB_MB=95`
+(the default, 100, lets clients try uploads Cloudflare will refuse).
+
 Cloudflare terminates TLS, so it sees the traffic. It still can't read your notes, because they're
 end-to-end encrypted, but it sees the same metadata the server does.
 
@@ -98,7 +102,11 @@ end-to-end encrypted, but it sees the same metadata the server does.
 - **Health:** the image has a `HEALTHCHECK` that runs `/tezca-server healthcheck` (GET `/healthz`).
 - **Backups:** back up the `tezca-data` volume. The database is `tezca.db` in WAL mode, so copy it
   together with `tezca.db-wal`/`-shm`, or stop the container first. A consistent online copy:
-  `sqlite3 tezca.db ".backup backup.db"`.
+  `sqlite3 tezca.db ".backup backup.db"`. Attachments are files under `blobs/` (written once, never
+  modified in place); back them up alongside the database.
+- **Attachments in S3:** set `TEZCA_S3_BUCKET`, `TEZCA_S3_ENDPOINT`, `TEZCA_S3_ACCESS_KEY` and
+  `TEZCA_S3_SECRET_KEY` (see [`server/README.md`](../server/README.md#configuration)) to keep
+  attachments in an existing S3-compatible bucket instead of `/data/blobs`.
 - **Upgrades:** `docker compose pull && docker compose up -d --build`. Migrations run on start.
 - **Shutdown:** `SIGTERM` closes all sessions (clients reconnect and resync) and exits cleanly.
 - **Environment:** see [`server/README.md`](../server/README.md#configuration).

@@ -2,14 +2,21 @@ package e2e
 
 import (
 	"bytes"
+	"context"
+	"crypto/rand"
+	"encoding/json"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"tezca/server/internal/api"
 	"tezca/server/internal/sigs"
+	"tezca/server/internal/store"
 )
 
 func get(t *testing.T, url string) (int, string, http.Header) {
@@ -89,7 +96,8 @@ func TestCORS(t *testing.T) {
 	}
 	resp.Body.Close()
 	if resp.StatusCode != 204 || resp.Header.Get("Access-Control-Allow-Origin") != "*" ||
-		!strings.Contains(resp.Header.Get("Access-Control-Allow-Headers"), "Authorization") {
+		!strings.Contains(resp.Header.Get("Access-Control-Allow-Headers"), "Authorization") ||
+		resp.Header.Get("Access-Control-Allow-Methods") != "GET, POST, PUT, HEAD, OPTIONS" {
 		t.Fatalf("preflight: %d %v", resp.StatusCode, resp.Header)
 	}
 	_, _, hdr := get(t, e.srv.URL+"/api/info")
@@ -252,4 +260,152 @@ func itoa(n int64) string { return strconv.FormatInt(n, 10) }
 
 func sigInputHTTP(method, path string, ts int64, body []byte) []byte {
 	return sigs.HTTP(method, path, uint64(ts), body)
+}
+
+func randBlobID() string {
+	b := make([]byte, 32)
+	rand.Read(b)
+	return b64.EncodeToString(b)
+}
+
+func TestBlobs(t *testing.T) {
+	e := newEnv(t, nil)
+	admin := newIdent()
+	e.claim(admin)
+	space := randSpaceID()
+	e.dial(admin, "a").createSpace(1, space)
+	editor, viewer, outsider := e.join(admin, "member"), e.join(admin, "guest"), e.join(admin, "member")
+	ctx := context.Background()
+	if err := e.st.AddMember(ctx, space, editor.pk, store.SpaceEditor, []byte("w")); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.st.AddMember(ctx, space, viewer.pk, store.SpaceViewer, []byte("w")); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, info := e.call("GET", "/api/info", nil, nil, 0); info["max_blob_bytes"] != float64(testMaxBlob) {
+		t.Fatalf("info: %v", info)
+	}
+
+	id := randBlobID()
+	path := "/api/spaces/" + space + "/blobs/" + id
+	ct := []byte("nonce+ciphertext+tag")
+	put := func(who *ident, p string, body []byte) (int, map[string]any) {
+		t.Helper()
+		code, _, data := e.rawCall("PUT", p, body, who, nil, false)
+		out := map[string]any{}
+		json.Unmarshal(data, &out)
+		return code, out
+	}
+
+	// Store, then idempotent re-upload.
+	if code, out := put(admin, path, ct); code != 201 || out["size"] != float64(len(ct)) {
+		t.Fatalf("put: %d %v", code, out)
+	}
+	if code, out := put(editor, path, []byte("a different encryption")); code != 200 || out["size"] != float64(len(ct)) {
+		t.Fatalf("re-put: %d %v", code, out)
+	}
+	for _, who := range []*ident{admin, editor, viewer} {
+		code, hdr, data := e.rawCall("GET", path, nil, who, nil, false)
+		if code != 200 || !bytes.Equal(data, ct) || hdr.Get("Content-Type") != "application/octet-stream" || hdr.Get("Content-Length") != itoa(int64(len(ct))) {
+			t.Fatalf("get: %d %q %v", code, data, hdr)
+		}
+		code, hdr, data = e.rawCall("HEAD", path, nil, who, nil, false)
+		if code != 200 || len(data) != 0 || hdr.Get("Content-Length") != itoa(int64(len(ct))) {
+			t.Fatalf("head: %d %v", code, hdr)
+		}
+	}
+
+	// Roles and auth.
+	if code, _ := put(viewer, "/api/spaces/"+space+"/blobs/"+randBlobID(), ct); code != 403 {
+		t.Fatalf("viewer put: %d", code)
+	}
+	if code, out := put(editor, "/api/spaces/"+space+"/blobs/"+randBlobID(), ct); code != 201 {
+		t.Fatalf("editor put: %d %v", code, out)
+	}
+	for _, m := range []string{"GET", "HEAD", "PUT"} {
+		if code, _, _ := e.rawCall(m, path, ct, outsider, nil, false); code != 403 {
+			t.Fatalf("outsider %s: %d", m, code)
+		}
+		if code, _, _ := e.rawCall(m, path, ct, nil, nil, false); code != 401 {
+			t.Fatalf("unsigned %s: %d", m, code)
+		}
+		if code, _, _ := e.rawCall(m, path, ct, newIdent(), nil, false); code != 401 {
+			t.Fatalf("unknown user %s: %d", m, code)
+		}
+	}
+	// The signature covers the body: a mismatched one is rejected and nothing is stored,
+	// whether or not the blob already exists.
+	fresh := "/api/spaces/" + space + "/blobs/" + randBlobID()
+	if code, _, _ := e.rawCall("PUT", fresh, ct, admin, []byte("other"), false); code != 401 {
+		t.Fatalf("bad body sig: %d", code)
+	}
+	if code, _, _ := e.rawCall("HEAD", fresh, nil, admin, nil, false); code != 404 {
+		t.Fatalf("blob stored despite bad sig: %d", code)
+	}
+	if code, _, _ := e.rawCall("PUT", path, ct, admin, []byte("other"), false); code != 401 {
+		t.Fatalf("bad body sig on existing blob: %d", code)
+	}
+	// Unknown blob, bad ids.
+	for _, m := range []string{"GET", "HEAD"} {
+		if code, _, _ := e.rawCall(m, fresh, nil, viewer, nil, false); code != 404 {
+			t.Fatalf("%s unknown: %d", m, code)
+		}
+	}
+	for _, p := range []string{
+		"/api/spaces/short/blobs/" + id,
+		"/api/spaces/" + space + "/blobs/" + id[:42],
+		"/api/spaces/" + space + "/blobs/" + id[:42] + "=",
+		"/api/spaces/" + space + "/blobs/" + strings.Repeat("~", 43),
+	} {
+		if code, _, _ := e.rawCall("PUT", p, ct, admin, nil, false); code != 400 {
+			t.Fatalf("bad id %s: %d", p, code)
+		}
+		if code, _, _ := e.rawCall("GET", p, nil, admin, nil, false); code != 400 {
+			t.Fatalf("bad id GET %s: %d", p, code)
+		}
+	}
+
+	// Size limit: max_blob_bytes + 40 is the largest accepted ciphertext, by Content-Length
+	// or streamed without one.
+	maxCT := make([]byte, testMaxBlob+api.BlobOverhead)
+	rand.Read(maxCT)
+	if code, out := put(admin, "/api/spaces/"+space+"/blobs/"+randBlobID(), maxCT); code != 201 || out["size"] != float64(len(maxCT)) {
+		t.Fatalf("max size: %d %v", code, out)
+	}
+	tooBig := append(maxCT, 0)
+	for _, chunked := range []bool{false, true} {
+		p := "/api/spaces/" + space + "/blobs/" + randBlobID()
+		code, _, data := e.rawCall("PUT", p, tooBig, admin, nil, chunked)
+		if code != 413 {
+			t.Fatalf("too big (chunked=%v): %d %s", chunked, code, data)
+		}
+		if code, _, _ := e.rawCall("HEAD", p, nil, admin, nil, false); code != 404 {
+			t.Fatalf("too-big blob stored (chunked=%v): %d", chunked, code)
+		}
+	}
+	// A chunked upload within the limit is fine.
+	if code, _, _ := e.rawCall("PUT", "/api/spaces/"+space+"/blobs/"+randBlobID(), ct, admin, nil, true); code != 201 {
+		t.Fatalf("chunked put: %d", code)
+	}
+
+	// If the bytes went missing from the blob store, a re-upload restores them.
+	if err := os.Remove(filepath.Join(e.blobDir, space, id[:2], id)); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, _ := e.rawCall("GET", path, nil, admin, nil, false); code != 404 {
+		t.Fatalf("get missing bytes: %d", code)
+	}
+	if code, out := put(admin, path, ct); code != 200 {
+		t.Fatalf("restore: %d %v", code, out)
+	}
+	if code, _, data := e.rawCall("GET", path, nil, admin, nil, false); code != 200 || !bytes.Equal(data, ct) {
+		t.Fatalf("get restored: %d", code)
+	}
+
+	// JSON endpoints keep their small body limit.
+	big := b64.EncodeToString(make([]byte, api.MaxBody))
+	if code, _ := e.call("POST", "/api/pairings", map[string]string{"ciphertext": big}, admin, 0); code != 413 {
+		t.Fatalf("JSON body limit: %d", code)
+	}
 }

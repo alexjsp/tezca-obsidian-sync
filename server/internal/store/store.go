@@ -42,11 +42,25 @@ const (
 	SpaceViewer = 3
 )
 
+// History is the snapshot retention policy (docs/protocol.md, "History").
+type History struct {
+	Hours int // keep the newest snapshot per clock hour for this many hours
+	Days  int // keep the newest snapshot per UTC day for this many days
+}
+
+// DefaultHistory matches TEZCA_HISTORY_HOURS / TEZCA_HISTORY_DAYS defaults.
+var DefaultHistory = History{Hours: 24, Days: 30}
+
 // Store wraps the database handles.
 type Store struct {
 	w *sql.DB // writer, exactly one connection
 	r *sql.DB // readers
+
+	history History
 }
+
+// SetHistory sets the snapshot retention policy (default DefaultHistory). Call before use.
+func (s *Store) SetHistory(h History) { s.history = h }
 
 func dsn(path string, readOnly bool) string {
 	q := url.Values{}
@@ -86,7 +100,7 @@ func Open(dir string) (*Store, error) {
 	}
 	r.SetMaxOpenConns(8)
 	r.SetMaxIdleConns(8)
-	return &Store{w: w, r: r}, nil
+	return &Store{w: w, r: r, history: DefaultHistory}, nil
 }
 
 // Close closes both handles.
@@ -108,6 +122,10 @@ CREATE TABLE space_keys(space_id TEXT NOT NULL, epoch INT NOT NULL, sign_pk BLOB
 CREATE TABLE docs(space_id TEXT NOT NULL, doc_id TEXT NOT NULL, latest_seq INT NOT NULL, snapshot_seq INT NOT NULL, updates_since_snapshot INT NOT NULL, bytes_since_snapshot INT NOT NULL, PRIMARY KEY(space_id, doc_id));
 CREATE TABLE updates(space_id TEXT NOT NULL, doc_id TEXT NOT NULL, seq INT NOT NULL, epoch INT NOT NULL, author BLOB NOT NULL, payload BLOB NOT NULL, sig BLOB NOT NULL, PRIMARY KEY(space_id, doc_id, seq));
 CREATE TABLE snapshots(space_id TEXT NOT NULL, doc_id TEXT NOT NULL, base_seq INT NOT NULL, epoch INT NOT NULL, author BLOB NOT NULL, payload BLOB NOT NULL, sig BLOB NOT NULL, created_at INT NOT NULL, PRIMARY KEY(space_id, doc_id, base_seq));
+`,
+	// v2 (M2): blob index. snapshots.created_at already exists since v1.
+	`
+CREATE TABLE IF NOT EXISTS blobs(space_id TEXT NOT NULL, blob_id TEXT NOT NULL, size INT NOT NULL, created_by BLOB NOT NULL, created_at INT NOT NULL, PRIMARY KEY(space_id, blob_id));
 `,
 }
 

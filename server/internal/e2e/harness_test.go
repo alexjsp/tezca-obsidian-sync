@@ -13,7 +13,9 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -21,6 +23,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"tezca/server/internal/api"
+	"tezca/server/internal/blobs"
 	"tezca/server/internal/pb"
 	"tezca/server/internal/sigs"
 	"tezca/server/internal/store"
@@ -37,11 +40,35 @@ type env struct {
 	hub      *ws.Hub
 	srv      *httptest.Server
 	serverID string
+	clock    *fakeClock // the hub's clock (snapshot created_at); HTTP auth uses real time
+	blobDir  string     // filesystem blob store root
+}
+
+// testMaxBlob is the plaintext blob limit in tests: small, so 413s don't need huge bodies.
+const testMaxBlob = 64 << 10
+
+// fakeClock is a settable clock. It starts at the real time and stands still.
+type fakeClock struct {
+	mu sync.Mutex
+	t  time.Time
+}
+
+func (c *fakeClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.t
+}
+
+func (c *fakeClock) Set(t time.Time) {
+	c.mu.Lock()
+	c.t = t
+	c.mu.Unlock()
 }
 
 func newEnv(t *testing.T, mod func(*ws.Config)) *env {
 	t.Helper()
-	st, err := store.Open(t.TempDir())
+	dir := t.TempDir()
+	st, err := store.Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,20 +76,26 @@ func newEnv(t *testing.T, mod func(*ws.Config)) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
+	blobDir := filepath.Join(dir, "blobs")
+	bs, err := blobs.NewFS(blobDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock := &fakeClock{t: time.Now()}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	cfg := ws.Config{Store: st, ServerID: id, Logger: log}
+	cfg := ws.Config{Store: st, ServerID: id, Logger: log, Now: clock.Now}
 	if mod != nil {
 		mod(&cfg)
 	}
 	hub := ws.NewHub(cfg)
-	h := api.New(api.Config{Store: st, Hub: hub, ServerID: id, Name: "Test", Logger: log})
+	h := api.New(api.Config{Store: st, Hub: hub, ServerID: id, Name: "Test", Logger: log, Blobs: bs, MaxBlobBytes: testMaxBlob})
 	srv := httptest.NewServer(h)
 	t.Cleanup(func() {
 		hub.Close()
 		srv.Close()
 		st.Close()
 	})
-	return &env{t: t, st: st, hub: hub, srv: srv, serverID: id}
+	return &env{t: t, st: st, hub: hub, srv: srv, serverID: id, clock: clock, blobDir: blobDir}
 }
 
 type ident struct {
@@ -107,6 +140,38 @@ func (e *env) call(method, path string, body any, signer *ident, skew time.Durat
 		}
 	}
 	return resp.StatusCode, out
+}
+
+// rawCall sends a raw body (chunked if chunked is set), signed by signer over sha256(signBody)
+// (signBody defaults to body). It returns the status, headers and response body.
+func (e *env) rawCall(method, path string, body []byte, signer *ident, signBody []byte, chunked bool) (int, http.Header, []byte) {
+	e.t.Helper()
+	var rd io.Reader = bytes.NewReader(body)
+	if chunked {
+		rd = io.MultiReader(rd) // hide the length
+	}
+	req, _ := http.NewRequest(method, e.srv.URL+path, rd)
+	if chunked {
+		req.ContentLength = -1
+	}
+	if method == "PUT" {
+		req.Header.Set("Content-Type", "application/octet-stream")
+	}
+	if signer != nil {
+		if signBody == nil {
+			signBody = body
+		}
+		ts := time.Now().Unix()
+		sig := signer.sign(sigs.HTTP(method, path, uint64(ts), signBody))
+		req.Header.Set("Authorization", fmt.Sprintf("Tezca pk=%s, ts=%d, sig=%s", b64.EncodeToString(signer.pk), ts, b64.EncodeToString(sig)))
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, resp.Header, data
 }
 
 func (e *env) claim(id *ident) {

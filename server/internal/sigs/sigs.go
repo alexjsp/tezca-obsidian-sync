@@ -50,7 +50,12 @@ func Auth(serverID string, nonce, signPk []byte, deviceID string) []byte {
 // HTTP is the message signed in the HTTP Authorization header.
 func HTTP(method, pathWithQuery string, ts uint64, body []byte) []byte {
 	h := sha256.Sum256(body)
-	return Input("http", method, pathWithQuery, U64(ts), h[:])
+	return HTTPDigest(method, pathWithQuery, ts, h[:])
+}
+
+// HTTPDigest is HTTP with the body's SHA-256 already computed (for streamed bodies).
+func HTTPDigest(method, pathWithQuery string, ts uint64, bodySHA256 []byte) []byte {
+	return Input("http", method, pathWithQuery, U64(ts), bodySHA256)
 }
 
 // Redeem is the message signed for /api/claim and /api/redeem (token = claim code or invite token).

@@ -151,6 +151,9 @@ type Doc struct {
 	SnapshotSeq          uint64
 	UpdatesSinceSnapshot uint32
 	BytesSinceSnapshot   uint64
+	// SnapshotCreatedAt is the latest snapshot's created_at (unix ms, 0 if none). Only GetDoc
+	// and PutSnapshot fill it in.
+	SnapshotCreatedAt int64
 }
 
 type Update struct {
@@ -162,19 +165,21 @@ type Update struct {
 }
 
 type Snapshot struct {
-	BaseSeq uint64
-	Epoch   uint32
-	Author  []byte
-	Payload []byte
-	Sig     []byte
+	BaseSeq   uint64
+	Epoch     uint32
+	Author    []byte
+	Payload   []byte
+	Sig       []byte
+	CreatedAt int64 // unix ms; set by the store
 }
 
 // GetDoc returns the doc row; a doc that has never been written returns a zero Doc (no error).
 func (s *Store) GetDoc(ctx context.Context, spaceID, docID string) (Doc, error) {
 	d := Doc{SpaceID: spaceID, DocID: docID}
-	err := s.r.QueryRowContext(ctx, `SELECT latest_seq, snapshot_seq, updates_since_snapshot, bytes_since_snapshot
-		FROM docs WHERE space_id = ? AND doc_id = ?`, spaceID, docID).
-		Scan(&d.LatestSeq, &d.SnapshotSeq, &d.UpdatesSinceSnapshot, &d.BytesSinceSnapshot)
+	err := s.r.QueryRowContext(ctx, `SELECT latest_seq, snapshot_seq, updates_since_snapshot, bytes_since_snapshot,
+		COALESCE((SELECT created_at FROM snapshots sn WHERE sn.space_id = d.space_id AND sn.doc_id = d.doc_id AND sn.base_seq = d.snapshot_seq), 0)
+		FROM docs d WHERE space_id = ? AND doc_id = ?`, spaceID, docID).
+		Scan(&d.LatestSeq, &d.SnapshotSeq, &d.UpdatesSinceSnapshot, &d.BytesSinceSnapshot, &d.SnapshotCreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return d, nil
 	}
@@ -249,12 +254,9 @@ func (s *Store) AppendUpdate(ctx context.Context, spaceID, docID string, u Updat
 	return d, nil
 }
 
-// KeepSnapshots is how many snapshots per doc are retained (M1).
-const KeepSnapshots = 3
-
-// PutSnapshot stores a snapshot, prunes updates with seq ≤ base_seq and old snapshots, and
-// recomputes the since-snapshot counters. Invalid base_seq → ErrConflict.
-// The caller must hold the doc's lock.
+// PutSnapshot stores a snapshot with created_at = now (unix ms), prunes updates with
+// seq ≤ base_seq, applies the History retention policy as of now, and recomputes the
+// since-snapshot counters. Invalid base_seq → ErrConflict. The caller must hold the doc's lock.
 func (s *Store) PutSnapshot(ctx context.Context, spaceID, docID string, sn Snapshot, now int64) (Doc, error) {
 	var d Doc
 	err := s.tx(ctx, func(tx *sql.Tx) error {
@@ -280,12 +282,11 @@ func (s *Store) PutSnapshot(ctx context.Context, spaceID, docID string, sn Snaps
 		if _, err := tx.Exec(`DELETE FROM updates WHERE space_id = ? AND doc_id = ? AND seq <= ?`, spaceID, docID, sn.BaseSeq); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(`DELETE FROM snapshots WHERE space_id = ? AND doc_id = ? AND base_seq NOT IN
-			(SELECT base_seq FROM snapshots WHERE space_id = ? AND doc_id = ? ORDER BY base_seq DESC LIMIT ?)`,
-			spaceID, docID, spaceID, docID, KeepSnapshots); err != nil {
+		if err := s.pruneSnapshots(tx, spaceID, docID, now); err != nil {
 			return err
 		}
 		d.SnapshotSeq = sn.BaseSeq
+		d.SnapshotCreatedAt = now
 		if err := tx.QueryRow(`SELECT COUNT(*), COALESCE(SUM(LENGTH(payload)), 0) FROM updates WHERE space_id = ? AND doc_id = ?`,
 			spaceID, docID).Scan(&d.UpdatesSinceSnapshot, &d.BytesSinceSnapshot); err != nil {
 			return err
@@ -300,9 +301,9 @@ func (s *Store) PutSnapshot(ctx context.Context, spaceID, docID string, sn Snaps
 // LatestSnapshot returns the newest snapshot for a doc, or ErrNotFound.
 func (s *Store) LatestSnapshot(ctx context.Context, spaceID, docID string) (Snapshot, error) {
 	var sn Snapshot
-	err := s.r.QueryRowContext(ctx, `SELECT base_seq, epoch, author, payload, sig FROM snapshots
+	err := s.r.QueryRowContext(ctx, `SELECT base_seq, epoch, author, payload, sig, created_at FROM snapshots
 		WHERE space_id = ? AND doc_id = ? ORDER BY base_seq DESC LIMIT 1`, spaceID, docID).
-		Scan(&sn.BaseSeq, &sn.Epoch, &sn.Author, &sn.Payload, &sn.Sig)
+		Scan(&sn.BaseSeq, &sn.Epoch, &sn.Author, &sn.Payload, &sn.Sig, &sn.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return sn, ErrNotFound
 	}

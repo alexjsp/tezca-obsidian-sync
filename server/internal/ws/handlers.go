@@ -85,6 +85,16 @@ func (c *conn) dispatch(ctx context.Context, f *pb.ClientFrame) {
 		if err := c.putSnapshot(ctx, p); err != nil {
 			c.fail(p.Ref, p.SpaceId, p.DocId, err)
 		}
+	case *pb.ClientFrame_ListVersions:
+		v := m.ListVersions
+		if err := c.listVersions(ctx, v); err != nil {
+			c.fail(v.Rid, v.SpaceId, v.DocId, err)
+		}
+	case *pb.ClientFrame_GetVersion:
+		v := m.GetVersion
+		if err := c.getVersion(ctx, v); err != nil {
+			c.fail(v.Rid, v.SpaceId, v.DocId, err)
+		}
 	case *pb.ClientFrame_Awareness:
 		a := m.Awareness
 		if err := c.awareness(ctx, a); err != nil {
@@ -238,6 +248,7 @@ func (c *conn) sendBacklog(ctx context.Context, space, doc string, since uint64)
 	c.send(&pb.ServerFrame{Msg: &pb.ServerFrame_SyncDone{SyncDone: &pb.SyncDone{
 		SpaceId: space, DocId: doc, LatestSeq: d.LatestSeq,
 		UpdatesSinceSnapshot: d.UpdatesSinceSnapshot, BytesSinceSnapshot: d.BytesSinceSnapshot,
+		SnapshotCreatedAt: d.SnapshotCreatedAt,
 	}}})
 	return nil
 }
@@ -328,11 +339,55 @@ func (c *conn) putSnapshot(ctx context.Context, m *pb.PutSnapshot) error {
 			return
 		}
 		c.send(&pb.ServerFrame{Msg: &pb.ServerFrame_SnapshotAck{SnapshotAck: &pb.SnapshotAck{
-			Ref: m.Ref, SpaceId: m.SpaceId, DocId: m.DocId, BaseSeq: m.BaseSeq,
+			Ref: m.Ref, SpaceId: m.SpaceId, DocId: m.DocId, BaseSeq: m.BaseSeq, CreatedAt: d.SnapshotCreatedAt,
 		}}})
 		c.h.broadcastHeads(m.SpaceId, headsFrame(d))
 	})
 	return opErr
+}
+
+// checkRead applies the id and membership checks shared by read-only doc requests.
+func (c *conn) checkRead(ctx context.Context, space, doc string) error {
+	if !store.ValidID(space) || !store.ValidID(doc) {
+		return errBadID
+	}
+	_, _, err := c.membership(ctx, space)
+	return err
+}
+
+func versionInfo(v store.Version) *pb.VersionInfo {
+	return &pb.VersionInfo{BaseSeq: v.BaseSeq, CreatedAt: v.CreatedAt, Author: v.Author, Size: v.Size, Epoch: v.Epoch}
+}
+
+func (c *conn) listVersions(ctx context.Context, m *pb.ListVersions) error {
+	if err := c.checkRead(ctx, m.SpaceId, m.DocId); err != nil {
+		return err
+	}
+	vs, err := c.h.cfg.Store.ListVersions(ctx, m.SpaceId, m.DocId)
+	if err != nil {
+		return err
+	}
+	out := &pb.VersionList{Rid: m.Rid, SpaceId: m.SpaceId, DocId: m.DocId, Versions: make([]*pb.VersionInfo, len(vs))}
+	for i, v := range vs {
+		out.Versions[i] = versionInfo(v)
+	}
+	c.send(&pb.ServerFrame{Msg: &pb.ServerFrame_VersionList{VersionList: out}})
+	return nil
+}
+
+func (c *conn) getVersion(ctx context.Context, m *pb.GetVersion) error {
+	if err := c.checkRead(ctx, m.SpaceId, m.DocId); err != nil {
+		return err
+	}
+	sn, err := c.h.cfg.Store.GetVersion(ctx, m.SpaceId, m.DocId, m.BaseSeq)
+	if err != nil {
+		return err // ErrNotFound → NOT_FOUND
+	}
+	info := versionInfo(store.Version{BaseSeq: sn.BaseSeq, CreatedAt: sn.CreatedAt, Author: sn.Author, Size: uint64(len(sn.Payload)), Epoch: sn.Epoch})
+	c.send(&pb.ServerFrame{Msg: &pb.ServerFrame_VersionData{VersionData: &pb.VersionData{
+		Rid: m.Rid, SpaceId: m.SpaceId, DocId: m.DocId, Info: info, Payload: sn.Payload, Sig: sn.Sig,
+	}}})
+	return nil
 }
 
 func (c *conn) awareness(ctx context.Context, m *pb.AwarenessIn) error {

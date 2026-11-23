@@ -2,6 +2,7 @@
 package api
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -16,6 +17,7 @@ import (
 
 	qrcode "github.com/skip2/go-qrcode"
 
+	"tezca/server/internal/blobs"
 	"tezca/server/internal/sigs"
 	"tezca/server/internal/store"
 	"tezca/server/internal/ws"
@@ -23,7 +25,9 @@ import (
 
 const (
 	MaxPairing      = 64 << 10
-	MaxBody         = 256 << 10
+	MaxBody         = 256 << 10 // JSON request bodies; blob bodies have their own limit
+	BlobOverhead    = 40        // nonce(24) + Poly1305 tag(16)
+	DefaultMaxBlob  = 100 << 20
 	MaxSkew         = 300 // seconds
 	PairingTTL      = 15 * time.Minute
 	DefaultInvite   = 7 * 24 * time.Hour
@@ -41,6 +45,9 @@ type Config struct {
 	Name      string
 	Logger    *slog.Logger
 	Now       func() time.Time
+
+	Blobs        blobs.BlobStore // blob bytes; blob routes are disabled if nil
+	MaxBlobBytes int64           // max plaintext blob size (default DefaultMaxBlob)
 }
 
 // API is the HTTP handler.
@@ -57,6 +64,9 @@ func New(cfg Config) *API {
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
+	}
+	if cfg.MaxBlobBytes <= 0 {
+		cfg.MaxBlobBytes = DefaultMaxBlob
 	}
 	cfg.PublicURL = strings.TrimRight(cfg.PublicURL, "/")
 	a := &API{cfg: cfg, log: cfg.Logger, mux: http.NewServeMux()}
@@ -75,6 +85,10 @@ func New(cfg Config) *API {
 	m.HandleFunc("POST /api/redeem", a.redeem)
 	m.HandleFunc("POST /api/pairings", a.createPairing)
 	m.HandleFunc("GET /api/pairings/{id}", a.takePairing)
+	if cfg.Blobs != nil {
+		m.HandleFunc("PUT /api/spaces/{space_id}/blobs/{blob_id}", a.putBlob)
+		m.HandleFunc("GET /api/spaces/{space_id}/blobs/{blob_id}", a.getBlob) // GET patterns also match HEAD
+	}
 	if cfg.Hub != nil {
 		m.Handle("GET /ws", cfg.Hub)
 	}
@@ -88,7 +102,7 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("Access-Control-Allow-Origin", "*")
 		h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
-		h.Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		h.Set("Access-Control-Allow-Methods", "GET, POST, PUT, HEAD, OPTIONS")
 		h.Set("Access-Control-Max-Age", "86400")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
@@ -194,20 +208,21 @@ func decode(body []byte, v any) error {
 	return nil
 }
 
-// authenticate verifies the `Authorization: Tezca pk=…, ts=…, sig=…` header against the
-// request and returns the registered user and the request body.
-func (a *API) authenticate(r *http.Request) (store.User, []byte, error) {
-	body, err := readBody(r)
-	if err != nil {
-		return store.User{}, nil, err
-	}
+// authHeader is a parsed `Authorization: Tezca pk=…, ts=…, sig=…` header.
+type authHeader struct {
+	pk, sig []byte
+	ts      int64
+}
+
+// parseAuth parses the Authorization header and checks the timestamp skew. It doesn't verify
+// the signature.
+func (a *API) parseAuth(r *http.Request) (authHeader, error) {
 	h := r.Header.Get("Authorization")
 	scheme, params, ok := strings.Cut(h, " ")
 	if !ok || !strings.EqualFold(scheme, "Tezca") {
-		return store.User{}, nil, herr(http.StatusUnauthorized, "missing Tezca authorization")
+		return authHeader{}, herr(http.StatusUnauthorized, "missing Tezca authorization")
 	}
-	var pk, sig []byte
-	var ts int64
+	var ah authHeader
 	var haveTS bool
 	for _, p := range strings.Split(params, ",") {
 		k, v, ok := strings.Cut(strings.TrimSpace(p), "=")
@@ -216,28 +231,55 @@ func (a *API) authenticate(r *http.Request) (store.User, []byte, error) {
 		}
 		switch k {
 		case "pk":
-			pk, _ = base64.RawURLEncoding.DecodeString(v)
+			ah.pk, _ = base64.RawURLEncoding.DecodeString(v)
 		case "sig":
-			sig, _ = base64.RawURLEncoding.DecodeString(v)
+			ah.sig, _ = base64.RawURLEncoding.DecodeString(v)
 		case "ts":
-			ts, err = strconv.ParseInt(v, 10, 64)
+			var err error
+			ah.ts, err = strconv.ParseInt(v, 10, 64)
 			haveTS = err == nil
 		}
 	}
-	if len(pk) != 32 || len(sig) != 64 || !haveTS || ts < 0 {
-		return store.User{}, nil, herr(http.StatusUnauthorized, "malformed authorization")
+	if len(ah.pk) != 32 || len(ah.sig) != 64 || !haveTS || ah.ts < 0 {
+		return authHeader{}, herr(http.StatusUnauthorized, "malformed authorization")
 	}
 	now := a.cfg.Now().Unix()
-	if ts < now-MaxSkew || ts > now+MaxSkew {
-		return store.User{}, nil, herr(http.StatusUnauthorized, "timestamp outside allowed skew")
+	if ah.ts < now-MaxSkew || ah.ts > now+MaxSkew {
+		return authHeader{}, herr(http.StatusUnauthorized, "timestamp outside allowed skew")
 	}
-	if !sigs.Verify(pk, sigs.HTTP(r.Method, r.RequestURI, uint64(ts), body), sig) {
+	return ah, nil
+}
+
+// verify checks the header's signature over the request and the body's SHA-256.
+func (ah authHeader) verify(r *http.Request, bodySHA256 []byte) bool {
+	return sigs.Verify(ah.pk, sigs.HTTPDigest(r.Method, r.RequestURI, uint64(ah.ts), bodySHA256), ah.sig)
+}
+
+// user returns the registered user for the header's key.
+func (a *API) user(r *http.Request, ah authHeader) (store.User, error) {
+	u, err := a.cfg.Store.GetUser(r.Context(), ah.pk)
+	if errors.Is(err, store.ErrNotFound) {
+		return store.User{}, herr(http.StatusUnauthorized, "unknown user")
+	}
+	return u, err
+}
+
+// authenticate verifies the `Authorization: Tezca pk=…, ts=…, sig=…` header against the
+// request and returns the registered user and the (size-limited) request body.
+func (a *API) authenticate(r *http.Request) (store.User, []byte, error) {
+	body, err := readBody(r)
+	if err != nil {
+		return store.User{}, nil, err
+	}
+	ah, err := a.parseAuth(r)
+	if err != nil {
+		return store.User{}, nil, err
+	}
+	sum := sha256.Sum256(body)
+	if !ah.verify(r, sum[:]) {
 		return store.User{}, nil, herr(http.StatusUnauthorized, "bad signature")
 	}
-	u, err := a.cfg.Store.GetUser(r.Context(), pk)
-	if errors.Is(err, store.ErrNotFound) {
-		return store.User{}, nil, herr(http.StatusUnauthorized, "unknown user")
-	}
+	u, err := a.user(r, ah)
 	if err != nil {
 		return store.User{}, nil, err
 	}
@@ -269,6 +311,7 @@ func (a *API) info(w http.ResponseWriter, r *http.Request) {
 		"protocol_version": ProtocolVersion,
 		"claimed":          claimed,
 		"name":             a.cfg.Name,
+		"max_blob_bytes":   a.cfg.MaxBlobBytes,
 	})
 }
 
