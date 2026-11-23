@@ -240,7 +240,9 @@ export class HostConnection {
 				break; // fall through to dispatch for ref-scoped errors (pushes)
 			}
 			case "spaceList":
-			case "spaceCreated": {
+			case "spaceCreated":
+			case "versionList":
+			case "versionData": {
 				const p = this.pending.get(m.value.rid);
 				if (p) {
 					this.pending.delete(m.value.rid);

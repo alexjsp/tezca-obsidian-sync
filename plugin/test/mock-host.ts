@@ -21,6 +21,8 @@ interface DocState {
 	updates: Update[];
 	latest: bigint;
 	snapshot: { baseSeq: bigint; epoch: number; author: Uint8Array; payload: Uint8Array; sig: Uint8Array } | null;
+	/** Every snapshot ever stored (the mock keeps all versions; no retention). */
+	versions: { baseSeq: bigint; epoch: number; author: Uint8Array; payload: Uint8Array; sig: Uint8Array; createdAt: bigint }[];
 	subs: Set<MockConn>;
 }
 
@@ -131,7 +133,7 @@ export class MockHost {
 
 	doc(space: SpaceState, docId: string): DocState {
 		let d = space.docs.get(docId);
-		if (!d) space.docs.set(docId, (d = { updates: [], latest: 0n, snapshot: null, subs: new Set() }));
+		if (!d) space.docs.set(docId, (d = { updates: [], latest: 0n, snapshot: null, versions: [], subs: new Set() }));
 		return d;
 	}
 
@@ -283,6 +285,7 @@ export class MockConn {
 						latestSeq: d.latest,
 						updatesSinceSnapshot: since.length,
 						bytesSinceSnapshot: BigInt(since.reduce((a, u) => a + u.payload.length, 0)),
+						snapshotCreatedAt: d.versions.at(-1)?.createdAt ?? 0n,
 					},
 				});
 				d.subs.add(this);
@@ -325,8 +328,29 @@ export class MockConn {
 				if (!verify(this.signPk!, sigMsg.snapshot(v.spaceId, v.docId, v.baseSeq, v.epoch, v.payload), v.sig))
 					return this.err(v.ref, ErrorCode.UNAUTHORIZED, "bad sig");
 				d.snapshot = { baseSeq: v.baseSeq, epoch: v.epoch, author: this.signPk!, payload: v.payload, sig: v.sig };
+				const createdAt = BigInt(Date.now());
+				d.versions.push({ ...d.snapshot, createdAt });
 				d.updates = d.updates.filter((u) => u.seq > v.baseSeq);
-				this.send({ case: "snapshotAck", value: { ref: v.ref, spaceId: v.spaceId, docId: v.docId, baseSeq: v.baseSeq } });
+				this.send({ case: "snapshotAck", value: { ref: v.ref, spaceId: v.spaceId, docId: v.docId, baseSeq: v.baseSeq, createdAt } });
+				return;
+			}
+			case "listVersions": {
+				const v = m.value;
+				const s = h.spaces.get(v.spaceId);
+				if (!s || !member(v.spaceId)) return this.err(v.rid, ErrorCode.FORBIDDEN, "not a member");
+				const d = h.doc(s, v.docId);
+				const versions = [...d.versions].reverse().map((x) => ({ baseSeq: x.baseSeq, createdAt: x.createdAt, author: x.author, size: BigInt(x.payload.length), epoch: x.epoch }));
+				this.send({ case: "versionList", value: { rid: v.rid, spaceId: v.spaceId, docId: v.docId, versions } });
+				return;
+			}
+			case "getVersion": {
+				const v = m.value;
+				const s = h.spaces.get(v.spaceId);
+				if (!s || !member(v.spaceId)) return this.err(v.rid, ErrorCode.FORBIDDEN, "not a member");
+				const x = h.doc(s, v.docId).versions.find((x) => x.baseSeq === v.baseSeq);
+				if (!x) return this.err(v.rid, ErrorCode.NOT_FOUND, "no such version");
+				const info = { baseSeq: x.baseSeq, createdAt: x.createdAt, author: x.author, size: BigInt(x.payload.length), epoch: x.epoch };
+				this.send({ case: "versionData", value: { rid: v.rid, spaceId: v.spaceId, docId: v.docId, info, payload: x.payload, sig: x.sig } });
 				return;
 			}
 			case "awareness": {

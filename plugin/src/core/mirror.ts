@@ -1230,6 +1230,22 @@ export class DiskMirror {
 		for (const id of ids) this.touch(id);
 	}
 
+	/** Revive a deleted entry at its last path and write it back to disk. */
+	restoreEntry(id: string): Promise<void> {
+		return this.enqueue(async () => {
+			const e = this.index.get(id);
+			if (!e || !e.deleted) return;
+			await this.ensureFolderEntries(e.path);
+			for (const dir of folderAncestors(e.path)) {
+				const vp = this.toVault(dir);
+				if (!(await this.vault.exists(vp))) await this.vault.mkdir(vp);
+			}
+			this.index.revive(id, e.path, LOCAL_ORIGIN);
+			this.applyCollisionRenames();
+			this.touch(id);
+		});
+	}
+
 	/** After an editor closes, make sure disk catches up with the CRDT. */
 	afterUnbind(vaultPath: string): void {
 		const rel = this.toRel(vaultPath);
@@ -1286,3 +1302,9 @@ export class DiskMirror {
 }
 
 export { REMOTE_ORIGIN };
+
+/** "a/b/c.md" → ["a", "a/b"] */
+function folderAncestors(rel: string): string[] {
+	const parts = rel.split("/");
+	return parts.slice(0, -1).map((_, i) => parts.slice(0, i + 1).join("/"));
+}

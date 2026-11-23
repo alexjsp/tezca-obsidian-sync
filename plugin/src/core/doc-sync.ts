@@ -14,6 +14,15 @@ const AWARENESS_REMOTE = "tezca-remote-awareness";
 /** Client-side compaction thresholds (see protocol.md). Mutable for tests. */
 export const compaction = { updates: 500, bytes: 1024 * 1024 };
 
+/**
+ * Version snapshots (protocol.md "History"): after local edits, once the doc has been quiet for
+ * `quietMs` and the latest snapshot is older than `intervalMs`, take a snapshot. Mutable for tests.
+ */
+export const versioning = { intervalMs: 60 * 60 * 1000, quietMs: 30_000 };
+
+/** Docs that never get version snapshots. */
+const UNVERSIONED = new Set(["index"]);
+
 type Phase = "offline" | "syncing" | "live";
 
 interface PendingEntry {
@@ -40,6 +49,11 @@ export class DocSync {
 	private hasSyncedOnce = false;
 	private awareness: Awareness | null = null;
 	private subscribed = false;
+	/** created_at of the latest snapshot the host told us about (unix ms; 0 = none). */
+	private lastSnapshotAt = 0;
+	/** Local edits have been acked since the latest snapshot. */
+	private editedSinceSnapshot = false;
+	private versionTimer: ReturnType<typeof setTimeout> | null = null;
 
 	constructor(
 		readonly ctx: SpaceContext,
@@ -181,6 +195,7 @@ export class DocSync {
 	handleSyncDone(d: SyncDone): void {
 		this.phase = "live";
 		this.sinceSnapshot = { count: d.updatesSinceSnapshot, bytes: Number(d.bytesSinceSnapshot) };
+		this.lastSnapshotAt = Number(d.snapshotCreatedAt);
 		if (d.latestSeq > this.lastSeq && this.pending.length === 0) {
 			// Server says there's more than we got — shouldn't happen, but recover.
 			this.resync(`syncDone latest ${d.latestSeq} > have ${this.lastSeq}`);
@@ -201,6 +216,8 @@ export class DocSync {
 		}
 		else if (a.seq > this.lastSeq + 1n) this.resync(`ack gap: have ${this.lastSeq}, ack ${a.seq}`);
 		this.sinceSnapshot.count++;
+		this.editedSinceSnapshot = true;
+		this.scheduleVersion();
 		this.scheduleSave();
 		this.maybeSnapshot();
 	}
@@ -209,6 +226,8 @@ export class DocSync {
 		if (this.snapshotInFlight === a.ref) {
 			this.snapshotInFlight = null;
 			this.sinceSnapshot = { count: 0, bytes: 0 };
+			this.editedSinceSnapshot = false;
+			this.lastSnapshotAt = Number(a.createdAt) || Date.now();
 		}
 	}
 
@@ -269,14 +288,30 @@ export class DocSync {
 		this.pending = [...this.pending.filter((p) => p.ref !== null), { update: merged, ref }];
 	}
 
+	private scheduleVersion() {
+		if (UNVERSIONED.has(this.docId) || this.closed) return;
+		if (this.versionTimer) clearTimeout(this.versionTimer);
+		this.versionTimer = setTimeout(() => {
+			this.versionTimer = null;
+			this.maybeVersion();
+		}, versioning.quietMs);
+	}
+
+	/** Take a version snapshot if local edits are due one (see `versioning`). */
+	private maybeVersion() {
+		if (UNVERSIONED.has(this.docId) || !this.editedSinceSnapshot) return;
+		if (Date.now() - this.lastSnapshotAt < versioning.intervalMs) return;
+		this.putSnapshot();
+	}
+
 	private maybeSnapshot() {
+		if (this.sinceSnapshot.count < compaction.updates && this.sinceSnapshot.bytes < compaction.bytes) return;
+		this.putSnapshot();
+	}
+
+	private putSnapshot() {
 		if (this.snapshotInFlight !== null || this.pending.length || this.phase !== "live") return;
-		if (!this.ctx.canWrite() || this.lastSeq === 0n) return;
-		if (
-			this.sinceSnapshot.count < compaction.updates &&
-			this.sinceSnapshot.bytes < compaction.bytes
-		)
-			return;
+		if (!this.ctx.canWrite() || this.lastSeq === 0n || !this.subscribed) return;
 		const epoch = this.ctx.currentEpoch();
 		const state = Y.encodeStateAsUpdate(this.ydoc);
 		const payload = seal(this.ctx.keyFor(epoch), state, ad.snapshot(this.ctx.spaceId, this.docId, epoch));
@@ -360,6 +395,11 @@ export class DocSync {
 	/** Unsubscribe, persist, and free. */
 	async close(): Promise<void> {
 		if (this.closed) return;
+		if (this.versionTimer) {
+			clearTimeout(this.versionTimer);
+			this.versionTimer = null;
+		}
+		this.maybeVersion(); // don't lose a due version because the doc is being unloaded
 		this.releaseAwareness();
 		if (this.subscribed) this.ctx.conn.send({ case: "unsubscribe", value: { spaceId: this.ctx.spaceId, docId: this.docId } });
 		this.subscribed = false;
