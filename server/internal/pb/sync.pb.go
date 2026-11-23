@@ -616,6 +616,8 @@ type ClientFrame struct {
 	//	*ClientFrame_PutSnapshot
 	//	*ClientFrame_Awareness
 	//	*ClientFrame_Ping
+	//	*ClientFrame_ListVersions
+	//	*ClientFrame_GetVersion
 	Msg           isClientFrame_Msg `protobuf_oneof:"msg"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -766,6 +768,24 @@ func (x *ClientFrame) GetPing() *Ping {
 	return nil
 }
 
+func (x *ClientFrame) GetListVersions() *ListVersions {
+	if x != nil {
+		if x, ok := x.Msg.(*ClientFrame_ListVersions); ok {
+			return x.ListVersions
+		}
+	}
+	return nil
+}
+
+func (x *ClientFrame) GetGetVersion() *GetVersion {
+	if x != nil {
+		if x, ok := x.Msg.(*ClientFrame_GetVersion); ok {
+			return x.GetVersion
+		}
+	}
+	return nil
+}
+
 type isClientFrame_Msg interface {
 	isClientFrame_Msg()
 }
@@ -818,6 +838,14 @@ type ClientFrame_Ping struct {
 	Ping *Ping `protobuf:"bytes,12,opt,name=ping,proto3,oneof"`
 }
 
+type ClientFrame_ListVersions struct {
+	ListVersions *ListVersions `protobuf:"bytes,13,opt,name=list_versions,json=listVersions,proto3,oneof"`
+}
+
+type ClientFrame_GetVersion struct {
+	GetVersion *GetVersion `protobuf:"bytes,14,opt,name=get_version,json=getVersion,proto3,oneof"`
+}
+
 func (*ClientFrame_Hello) isClientFrame_Msg() {}
 
 func (*ClientFrame_Auth) isClientFrame_Msg() {}
@@ -841,6 +869,10 @@ func (*ClientFrame_PutSnapshot) isClientFrame_Msg() {}
 func (*ClientFrame_Awareness) isClientFrame_Msg() {}
 
 func (*ClientFrame_Ping) isClientFrame_Msg() {}
+
+func (*ClientFrame_ListVersions) isClientFrame_Msg() {}
+
+func (*ClientFrame_GetVersion) isClientFrame_Msg() {}
 
 type Hello struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
@@ -1579,6 +1611,8 @@ type ServerFrame struct {
 	//	*ServerFrame_Awareness
 	//	*ServerFrame_Error
 	//	*ServerFrame_Pong
+	//	*ServerFrame_VersionList
+	//	*ServerFrame_VersionData
 	Msg           isServerFrame_Msg `protobuf_oneof:"msg"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1738,6 +1772,24 @@ func (x *ServerFrame) GetPong() *Pong {
 	return nil
 }
 
+func (x *ServerFrame) GetVersionList() *VersionList {
+	if x != nil {
+		if x, ok := x.Msg.(*ServerFrame_VersionList); ok {
+			return x.VersionList
+		}
+	}
+	return nil
+}
+
+func (x *ServerFrame) GetVersionData() *VersionData {
+	if x != nil {
+		if x, ok := x.Msg.(*ServerFrame_VersionData); ok {
+			return x.VersionData
+		}
+	}
+	return nil
+}
+
 type isServerFrame_Msg interface {
 	isServerFrame_Msg()
 }
@@ -1794,6 +1846,14 @@ type ServerFrame_Pong struct {
 	Pong *Pong `protobuf:"bytes,13,opt,name=pong,proto3,oneof"`
 }
 
+type ServerFrame_VersionList struct {
+	VersionList *VersionList `protobuf:"bytes,14,opt,name=version_list,json=versionList,proto3,oneof"`
+}
+
+type ServerFrame_VersionData struct {
+	VersionData *VersionData `protobuf:"bytes,15,opt,name=version_data,json=versionData,proto3,oneof"`
+}
+
 func (*ServerFrame_Challenge) isServerFrame_Msg() {}
 
 func (*ServerFrame_AuthOk) isServerFrame_Msg() {}
@@ -1819,6 +1879,10 @@ func (*ServerFrame_Awareness) isServerFrame_Msg() {}
 func (*ServerFrame_Error) isServerFrame_Msg() {}
 
 func (*ServerFrame_Pong) isServerFrame_Msg() {}
+
+func (*ServerFrame_VersionList) isServerFrame_Msg() {}
+
+func (*ServerFrame_VersionData) isServerFrame_Msg() {}
 
 type Challenge struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
@@ -2265,6 +2329,7 @@ type SyncDone struct {
 	LatestSeq            uint64                 `protobuf:"varint,3,opt,name=latest_seq,json=latestSeq,proto3" json:"latest_seq,omitempty"`
 	UpdatesSinceSnapshot uint32                 `protobuf:"varint,4,opt,name=updates_since_snapshot,json=updatesSinceSnapshot,proto3" json:"updates_since_snapshot,omitempty"`
 	BytesSinceSnapshot   uint64                 `protobuf:"varint,5,opt,name=bytes_since_snapshot,json=bytesSinceSnapshot,proto3" json:"bytes_since_snapshot,omitempty"`
+	SnapshotCreatedAt    int64                  `protobuf:"varint,6,opt,name=snapshot_created_at,json=snapshotCreatedAt,proto3" json:"snapshot_created_at,omitempty"` // unix ms of the latest snapshot, 0 if none
 	unknownFields        protoimpl.UnknownFields
 	sizeCache            protoimpl.SizeCache
 }
@@ -2330,6 +2395,13 @@ func (x *SyncDone) GetUpdatesSinceSnapshot() uint32 {
 func (x *SyncDone) GetBytesSinceSnapshot() uint64 {
 	if x != nil {
 		return x.BytesSinceSnapshot
+	}
+	return 0
+}
+
+func (x *SyncDone) GetSnapshotCreatedAt() int64 {
+	if x != nil {
+		return x.SnapshotCreatedAt
 	}
 	return 0
 }
@@ -2408,6 +2480,7 @@ type SnapshotAck struct {
 	SpaceId       string                 `protobuf:"bytes,2,opt,name=space_id,json=spaceId,proto3" json:"space_id,omitempty"`
 	DocId         string                 `protobuf:"bytes,3,opt,name=doc_id,json=docId,proto3" json:"doc_id,omitempty"`
 	BaseSeq       uint64                 `protobuf:"varint,4,opt,name=base_seq,json=baseSeq,proto3" json:"base_seq,omitempty"`
+	CreatedAt     int64                  `protobuf:"varint,5,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"` // unix ms
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2466,6 +2539,13 @@ func (x *SnapshotAck) GetDocId() string {
 func (x *SnapshotAck) GetBaseSeq() uint64 {
 	if x != nil {
 		return x.BaseSeq
+	}
+	return 0
+}
+
+func (x *SnapshotAck) GetCreatedAt() int64 {
+	if x != nil {
+		return x.CreatedAt
 	}
 	return 0
 }
@@ -2674,6 +2754,364 @@ func (x *Pong) GetT() uint64 {
 	return 0
 }
 
+// List a doc's retained snapshots (versions), newest first. Membership required.
+type ListVersions struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Rid           uint32                 `protobuf:"varint,1,opt,name=rid,proto3" json:"rid,omitempty"`
+	SpaceId       string                 `protobuf:"bytes,2,opt,name=space_id,json=spaceId,proto3" json:"space_id,omitempty"`
+	DocId         string                 `protobuf:"bytes,3,opt,name=doc_id,json=docId,proto3" json:"doc_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListVersions) Reset() {
+	*x = ListVersions{}
+	mi := &file_tezca_v1_sync_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListVersions) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListVersions) ProtoMessage() {}
+
+func (x *ListVersions) ProtoReflect() protoreflect.Message {
+	mi := &file_tezca_v1_sync_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListVersions.ProtoReflect.Descriptor instead.
+func (*ListVersions) Descriptor() ([]byte, []int) {
+	return file_tezca_v1_sync_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *ListVersions) GetRid() uint32 {
+	if x != nil {
+		return x.Rid
+	}
+	return 0
+}
+
+func (x *ListVersions) GetSpaceId() string {
+	if x != nil {
+		return x.SpaceId
+	}
+	return ""
+}
+
+func (x *ListVersions) GetDocId() string {
+	if x != nil {
+		return x.DocId
+	}
+	return ""
+}
+
+type VersionInfo struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	BaseSeq       uint64                 `protobuf:"varint,1,opt,name=base_seq,json=baseSeq,proto3" json:"base_seq,omitempty"`
+	CreatedAt     int64                  `protobuf:"varint,2,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"` // unix ms
+	Author        []byte                 `protobuf:"bytes,3,opt,name=author,proto3" json:"author,omitempty"`                         // sign_pk of the uploader
+	Size          uint64                 `protobuf:"varint,4,opt,name=size,proto3" json:"size,omitempty"`                            // payload bytes
+	Epoch         uint32                 `protobuf:"varint,5,opt,name=epoch,proto3" json:"epoch,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *VersionInfo) Reset() {
+	*x = VersionInfo{}
+	mi := &file_tezca_v1_sync_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *VersionInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*VersionInfo) ProtoMessage() {}
+
+func (x *VersionInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_tezca_v1_sync_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use VersionInfo.ProtoReflect.Descriptor instead.
+func (*VersionInfo) Descriptor() ([]byte, []int) {
+	return file_tezca_v1_sync_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *VersionInfo) GetBaseSeq() uint64 {
+	if x != nil {
+		return x.BaseSeq
+	}
+	return 0
+}
+
+func (x *VersionInfo) GetCreatedAt() int64 {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return 0
+}
+
+func (x *VersionInfo) GetAuthor() []byte {
+	if x != nil {
+		return x.Author
+	}
+	return nil
+}
+
+func (x *VersionInfo) GetSize() uint64 {
+	if x != nil {
+		return x.Size
+	}
+	return 0
+}
+
+func (x *VersionInfo) GetEpoch() uint32 {
+	if x != nil {
+		return x.Epoch
+	}
+	return 0
+}
+
+type VersionList struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Rid           uint32                 `protobuf:"varint,1,opt,name=rid,proto3" json:"rid,omitempty"`
+	SpaceId       string                 `protobuf:"bytes,2,opt,name=space_id,json=spaceId,proto3" json:"space_id,omitempty"`
+	DocId         string                 `protobuf:"bytes,3,opt,name=doc_id,json=docId,proto3" json:"doc_id,omitempty"`
+	Versions      []*VersionInfo         `protobuf:"bytes,4,rep,name=versions,proto3" json:"versions,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *VersionList) Reset() {
+	*x = VersionList{}
+	mi := &file_tezca_v1_sync_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *VersionList) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*VersionList) ProtoMessage() {}
+
+func (x *VersionList) ProtoReflect() protoreflect.Message {
+	mi := &file_tezca_v1_sync_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use VersionList.ProtoReflect.Descriptor instead.
+func (*VersionList) Descriptor() ([]byte, []int) {
+	return file_tezca_v1_sync_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *VersionList) GetRid() uint32 {
+	if x != nil {
+		return x.Rid
+	}
+	return 0
+}
+
+func (x *VersionList) GetSpaceId() string {
+	if x != nil {
+		return x.SpaceId
+	}
+	return ""
+}
+
+func (x *VersionList) GetDocId() string {
+	if x != nil {
+		return x.DocId
+	}
+	return ""
+}
+
+func (x *VersionList) GetVersions() []*VersionInfo {
+	if x != nil {
+		return x.Versions
+	}
+	return nil
+}
+
+// Fetch one retained snapshot. Membership required. NOT_FOUND if pruned.
+type GetVersion struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Rid           uint32                 `protobuf:"varint,1,opt,name=rid,proto3" json:"rid,omitempty"`
+	SpaceId       string                 `protobuf:"bytes,2,opt,name=space_id,json=spaceId,proto3" json:"space_id,omitempty"`
+	DocId         string                 `protobuf:"bytes,3,opt,name=doc_id,json=docId,proto3" json:"doc_id,omitempty"`
+	BaseSeq       uint64                 `protobuf:"varint,4,opt,name=base_seq,json=baseSeq,proto3" json:"base_seq,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetVersion) Reset() {
+	*x = GetVersion{}
+	mi := &file_tezca_v1_sync_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetVersion) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetVersion) ProtoMessage() {}
+
+func (x *GetVersion) ProtoReflect() protoreflect.Message {
+	mi := &file_tezca_v1_sync_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetVersion.ProtoReflect.Descriptor instead.
+func (*GetVersion) Descriptor() ([]byte, []int) {
+	return file_tezca_v1_sync_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *GetVersion) GetRid() uint32 {
+	if x != nil {
+		return x.Rid
+	}
+	return 0
+}
+
+func (x *GetVersion) GetSpaceId() string {
+	if x != nil {
+		return x.SpaceId
+	}
+	return ""
+}
+
+func (x *GetVersion) GetDocId() string {
+	if x != nil {
+		return x.DocId
+	}
+	return ""
+}
+
+func (x *GetVersion) GetBaseSeq() uint64 {
+	if x != nil {
+		return x.BaseSeq
+	}
+	return 0
+}
+
+type VersionData struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Rid           uint32                 `protobuf:"varint,1,opt,name=rid,proto3" json:"rid,omitempty"`
+	SpaceId       string                 `protobuf:"bytes,2,opt,name=space_id,json=spaceId,proto3" json:"space_id,omitempty"`
+	DocId         string                 `protobuf:"bytes,3,opt,name=doc_id,json=docId,proto3" json:"doc_id,omitempty"`
+	Info          *VersionInfo           `protobuf:"bytes,4,opt,name=info,proto3" json:"info,omitempty"`
+	Payload       []byte                 `protobuf:"bytes,5,opt,name=payload,proto3" json:"payload,omitempty"` // encrypted exactly as a Snapshot payload
+	Sig           []byte                 `protobuf:"bytes,6,opt,name=sig,proto3" json:"sig,omitempty"`         // the uploader's PutSnapshot sig
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *VersionData) Reset() {
+	*x = VersionData{}
+	mi := &file_tezca_v1_sync_proto_msgTypes[36]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *VersionData) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*VersionData) ProtoMessage() {}
+
+func (x *VersionData) ProtoReflect() protoreflect.Message {
+	mi := &file_tezca_v1_sync_proto_msgTypes[36]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use VersionData.ProtoReflect.Descriptor instead.
+func (*VersionData) Descriptor() ([]byte, []int) {
+	return file_tezca_v1_sync_proto_rawDescGZIP(), []int{36}
+}
+
+func (x *VersionData) GetRid() uint32 {
+	if x != nil {
+		return x.Rid
+	}
+	return 0
+}
+
+func (x *VersionData) GetSpaceId() string {
+	if x != nil {
+		return x.SpaceId
+	}
+	return ""
+}
+
+func (x *VersionData) GetDocId() string {
+	if x != nil {
+		return x.DocId
+	}
+	return ""
+}
+
+func (x *VersionData) GetInfo() *VersionInfo {
+	if x != nil {
+		return x.Info
+	}
+	return nil
+}
+
+func (x *VersionData) GetPayload() []byte {
+	if x != nil {
+		return x.Payload
+	}
+	return nil
+}
+
+func (x *VersionData) GetSig() []byte {
+	if x != nil {
+		return x.Sig
+	}
+	return nil
+}
+
 var File_tezca_v1_sync_proto protoreflect.FileDescriptor
 
 const file_tezca_v1_sync_proto_rawDesc = "" +
@@ -2706,7 +3144,7 @@ const file_tezca_v1_sync_proto_rawDesc = "" +
 	"\x05epoch\x18\x02 \x01(\rR\x05epoch\x12\x16\n" +
 	"\x06author\x18\x03 \x01(\fR\x06author\x12\x18\n" +
 	"\apayload\x18\x04 \x01(\fR\apayload\x12\x10\n" +
-	"\x03sig\x18\x05 \x01(\fR\x03sig\"\xaa\x05\n" +
+	"\x03sig\x18\x05 \x01(\fR\x03sig\"\xa2\x06\n" +
 	"\vClientFrame\x12'\n" +
 	"\x05hello\x18\x01 \x01(\v2\x0f.tezca.v1.HelloH\x00R\x05hello\x12$\n" +
 	"\x04auth\x18\x02 \x01(\v2\x0e.tezca.v1.AuthH\x00R\x04auth\x127\n" +
@@ -2722,7 +3160,10 @@ const file_tezca_v1_sync_proto_rawDesc = "" +
 	"\fput_snapshot\x18\n" +
 	" \x01(\v2\x15.tezca.v1.PutSnapshotH\x00R\vputSnapshot\x125\n" +
 	"\tawareness\x18\v \x01(\v2\x15.tezca.v1.AwarenessInH\x00R\tawareness\x12$\n" +
-	"\x04ping\x18\f \x01(\v2\x0e.tezca.v1.PingH\x00R\x04pingB\x05\n" +
+	"\x04ping\x18\f \x01(\v2\x0e.tezca.v1.PingH\x00R\x04ping\x12=\n" +
+	"\rlist_versions\x18\r \x01(\v2\x16.tezca.v1.ListVersionsH\x00R\flistVersions\x127\n" +
+	"\vget_version\x18\x0e \x01(\v2\x14.tezca.v1.GetVersionH\x00R\n" +
+	"getVersionB\x05\n" +
 	"\x03msg\"\x8f\x01\n" +
 	"\x05Hello\x12\x17\n" +
 	"\asign_pk\x18\x01 \x01(\fR\x06signPk\x12\x1b\n" +
@@ -2774,7 +3215,7 @@ const file_tezca_v1_sync_proto_rawDesc = "" +
 	"\x05epoch\x18\x03 \x01(\rR\x05epoch\x12\x18\n" +
 	"\apayload\x18\x04 \x01(\fR\apayload\"\x14\n" +
 	"\x04Ping\x12\f\n" +
-	"\x01t\x18\x01 \x01(\x04R\x01t\"\x98\x05\n" +
+	"\x01t\x18\x01 \x01(\x04R\x01t\"\x90\x06\n" +
 	"\vServerFrame\x123\n" +
 	"\tchallenge\x18\x01 \x01(\v2\x13.tezca.v1.ChallengeH\x00R\tchallenge\x12+\n" +
 	"\aauth_ok\x18\x02 \x01(\v2\x10.tezca.v1.AuthOkH\x00R\x06authOk\x124\n" +
@@ -2790,7 +3231,9 @@ const file_tezca_v1_sync_proto_rawDesc = "" +
 	" \x01(\v2\x15.tezca.v1.SnapshotAckH\x00R\vsnapshotAck\x126\n" +
 	"\tawareness\x18\v \x01(\v2\x16.tezca.v1.AwarenessOutH\x00R\tawareness\x12'\n" +
 	"\x05error\x18\f \x01(\v2\x0f.tezca.v1.ErrorH\x00R\x05error\x12$\n" +
-	"\x04pong\x18\r \x01(\v2\x0e.tezca.v1.PongH\x00R\x04pongB\x05\n" +
+	"\x04pong\x18\r \x01(\v2\x0e.tezca.v1.PongH\x00R\x04pong\x12:\n" +
+	"\fversion_list\x18\x0e \x01(\v2\x15.tezca.v1.VersionListH\x00R\vversionList\x12:\n" +
+	"\fversion_data\x18\x0f \x01(\v2\x15.tezca.v1.VersionDataH\x00R\vversionDataB\x05\n" +
 	"\x03msg\"i\n" +
 	"\tChallenge\x12\x14\n" +
 	"\x05nonce\x18\x01 \x01(\fR\x05nonce\x12\x1b\n" +
@@ -2821,24 +3264,27 @@ const file_tezca_v1_sync_proto_rawDesc = "" +
 	"\aUpdates\x12\x19\n" +
 	"\bspace_id\x18\x01 \x01(\tR\aspaceId\x12\x15\n" +
 	"\x06doc_id\x18\x02 \x01(\tR\x05docId\x12*\n" +
-	"\aupdates\x18\x03 \x03(\v2\x10.tezca.v1.UpdateR\aupdates\"\xc3\x01\n" +
+	"\aupdates\x18\x03 \x03(\v2\x10.tezca.v1.UpdateR\aupdates\"\xf3\x01\n" +
 	"\bSyncDone\x12\x19\n" +
 	"\bspace_id\x18\x01 \x01(\tR\aspaceId\x12\x15\n" +
 	"\x06doc_id\x18\x02 \x01(\tR\x05docId\x12\x1d\n" +
 	"\n" +
 	"latest_seq\x18\x03 \x01(\x04R\tlatestSeq\x124\n" +
 	"\x16updates_since_snapshot\x18\x04 \x01(\rR\x14updatesSinceSnapshot\x120\n" +
-	"\x14bytes_since_snapshot\x18\x05 \x01(\x04R\x12bytesSinceSnapshot\"[\n" +
+	"\x14bytes_since_snapshot\x18\x05 \x01(\x04R\x12bytesSinceSnapshot\x12.\n" +
+	"\x13snapshot_created_at\x18\x06 \x01(\x03R\x11snapshotCreatedAt\"[\n" +
 	"\x03Ack\x12\x10\n" +
 	"\x03ref\x18\x01 \x01(\rR\x03ref\x12\x19\n" +
 	"\bspace_id\x18\x02 \x01(\tR\aspaceId\x12\x15\n" +
 	"\x06doc_id\x18\x03 \x01(\tR\x05docId\x12\x10\n" +
-	"\x03seq\x18\x04 \x01(\x04R\x03seq\"l\n" +
+	"\x03seq\x18\x04 \x01(\x04R\x03seq\"\x8b\x01\n" +
 	"\vSnapshotAck\x12\x10\n" +
 	"\x03ref\x18\x01 \x01(\rR\x03ref\x12\x19\n" +
 	"\bspace_id\x18\x02 \x01(\tR\aspaceId\x12\x15\n" +
 	"\x06doc_id\x18\x03 \x01(\tR\x05docId\x12\x19\n" +
-	"\bbase_seq\x18\x04 \x01(\x04R\abaseSeq\"\xa1\x01\n" +
+	"\bbase_seq\x18\x04 \x01(\x04R\abaseSeq\x12\x1d\n" +
+	"\n" +
+	"created_at\x18\x05 \x01(\x03R\tcreatedAt\"\xa1\x01\n" +
 	"\fAwarenessOut\x12\x19\n" +
 	"\bspace_id\x18\x01 \x01(\tR\aspaceId\x12\x15\n" +
 	"\x06doc_id\x18\x02 \x01(\tR\x05docId\x12\x14\n" +
@@ -2853,7 +3299,36 @@ const file_tezca_v1_sync_proto_rawDesc = "" +
 	"\bspace_id\x18\x04 \x01(\tR\aspaceId\x12\x15\n" +
 	"\x06doc_id\x18\x05 \x01(\tR\x05docId\"\x14\n" +
 	"\x04Pong\x12\f\n" +
-	"\x01t\x18\x01 \x01(\x04R\x01t*j\n" +
+	"\x01t\x18\x01 \x01(\x04R\x01t\"R\n" +
+	"\fListVersions\x12\x10\n" +
+	"\x03rid\x18\x01 \x01(\rR\x03rid\x12\x19\n" +
+	"\bspace_id\x18\x02 \x01(\tR\aspaceId\x12\x15\n" +
+	"\x06doc_id\x18\x03 \x01(\tR\x05docId\"\x89\x01\n" +
+	"\vVersionInfo\x12\x19\n" +
+	"\bbase_seq\x18\x01 \x01(\x04R\abaseSeq\x12\x1d\n" +
+	"\n" +
+	"created_at\x18\x02 \x01(\x03R\tcreatedAt\x12\x16\n" +
+	"\x06author\x18\x03 \x01(\fR\x06author\x12\x12\n" +
+	"\x04size\x18\x04 \x01(\x04R\x04size\x12\x14\n" +
+	"\x05epoch\x18\x05 \x01(\rR\x05epoch\"\x84\x01\n" +
+	"\vVersionList\x12\x10\n" +
+	"\x03rid\x18\x01 \x01(\rR\x03rid\x12\x19\n" +
+	"\bspace_id\x18\x02 \x01(\tR\aspaceId\x12\x15\n" +
+	"\x06doc_id\x18\x03 \x01(\tR\x05docId\x121\n" +
+	"\bversions\x18\x04 \x03(\v2\x15.tezca.v1.VersionInfoR\bversions\"k\n" +
+	"\n" +
+	"GetVersion\x12\x10\n" +
+	"\x03rid\x18\x01 \x01(\rR\x03rid\x12\x19\n" +
+	"\bspace_id\x18\x02 \x01(\tR\aspaceId\x12\x15\n" +
+	"\x06doc_id\x18\x03 \x01(\tR\x05docId\x12\x19\n" +
+	"\bbase_seq\x18\x04 \x01(\x04R\abaseSeq\"\xa8\x01\n" +
+	"\vVersionData\x12\x10\n" +
+	"\x03rid\x18\x01 \x01(\rR\x03rid\x12\x19\n" +
+	"\bspace_id\x18\x02 \x01(\tR\aspaceId\x12\x15\n" +
+	"\x06doc_id\x18\x03 \x01(\tR\x05docId\x12)\n" +
+	"\x04info\x18\x04 \x01(\v2\x15.tezca.v1.VersionInfoR\x04info\x12\x18\n" +
+	"\apayload\x18\x05 \x01(\fR\apayload\x12\x10\n" +
+	"\x03sig\x18\x06 \x01(\fR\x03sig*j\n" +
 	"\tSpaceKind\x12\x1a\n" +
 	"\x16SPACE_KIND_UNSPECIFIED\x10\x00\x12\x13\n" +
 	"\x0fSPACE_KIND_ROOT\x10\x01\x12\x14\n" +
@@ -2894,7 +3369,7 @@ func file_tezca_v1_sync_proto_rawDescGZIP() []byte {
 }
 
 var file_tezca_v1_sync_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-var file_tezca_v1_sync_proto_msgTypes = make([]protoimpl.MessageInfo, 32)
+var file_tezca_v1_sync_proto_msgTypes = make([]protoimpl.MessageInfo, 37)
 var file_tezca_v1_sync_proto_goTypes = []any{
 	(SpaceKind)(0),           // 0: tezca.v1.SpaceKind
 	(SpaceRole)(0),           // 1: tezca.v1.SpaceRole
@@ -2932,6 +3407,11 @@ var file_tezca_v1_sync_proto_goTypes = []any{
 	(*AwarenessOut)(nil),     // 33: tezca.v1.AwarenessOut
 	(*Error)(nil),            // 34: tezca.v1.Error
 	(*Pong)(nil),             // 35: tezca.v1.Pong
+	(*ListVersions)(nil),     // 36: tezca.v1.ListVersions
+	(*VersionInfo)(nil),      // 37: tezca.v1.VersionInfo
+	(*VersionList)(nil),      // 38: tezca.v1.VersionList
+	(*GetVersion)(nil),       // 39: tezca.v1.GetVersion
+	(*VersionData)(nil),      // 40: tezca.v1.VersionData
 }
 var file_tezca_v1_sync_proto_depIdxs = []int32{
 	0,  // 0: tezca.v1.SpaceInfo.kind:type_name -> tezca.v1.SpaceKind
@@ -2951,31 +3431,37 @@ var file_tezca_v1_sync_proto_depIdxs = []int32{
 	19, // 14: tezca.v1.ClientFrame.put_snapshot:type_name -> tezca.v1.PutSnapshot
 	20, // 15: tezca.v1.ClientFrame.awareness:type_name -> tezca.v1.AwarenessIn
 	21, // 16: tezca.v1.ClientFrame.ping:type_name -> tezca.v1.Ping
-	0,  // 17: tezca.v1.CreateSpace.kind:type_name -> tezca.v1.SpaceKind
-	23, // 18: tezca.v1.ServerFrame.challenge:type_name -> tezca.v1.Challenge
-	24, // 19: tezca.v1.ServerFrame.auth_ok:type_name -> tezca.v1.AuthOk
-	25, // 20: tezca.v1.ServerFrame.space_list:type_name -> tezca.v1.SpaceList
-	26, // 21: tezca.v1.ServerFrame.space_created:type_name -> tezca.v1.SpaceCreated
-	27, // 22: tezca.v1.ServerFrame.doc_heads:type_name -> tezca.v1.DocHeads
-	28, // 23: tezca.v1.ServerFrame.snapshot:type_name -> tezca.v1.Snapshot
-	29, // 24: tezca.v1.ServerFrame.updates:type_name -> tezca.v1.Updates
-	30, // 25: tezca.v1.ServerFrame.sync_done:type_name -> tezca.v1.SyncDone
-	31, // 26: tezca.v1.ServerFrame.ack:type_name -> tezca.v1.Ack
-	32, // 27: tezca.v1.ServerFrame.snapshot_ack:type_name -> tezca.v1.SnapshotAck
-	33, // 28: tezca.v1.ServerFrame.awareness:type_name -> tezca.v1.AwarenessOut
-	34, // 29: tezca.v1.ServerFrame.error:type_name -> tezca.v1.Error
-	35, // 30: tezca.v1.ServerFrame.pong:type_name -> tezca.v1.Pong
-	2,  // 31: tezca.v1.AuthOk.role:type_name -> tezca.v1.HostRole
-	5,  // 32: tezca.v1.SpaceList.spaces:type_name -> tezca.v1.SpaceInfo
-	5,  // 33: tezca.v1.SpaceCreated.space:type_name -> tezca.v1.SpaceInfo
-	7,  // 34: tezca.v1.DocHeads.heads:type_name -> tezca.v1.DocHead
-	8,  // 35: tezca.v1.Updates.updates:type_name -> tezca.v1.Update
-	3,  // 36: tezca.v1.Error.code:type_name -> tezca.v1.ErrorCode
-	37, // [37:37] is the sub-list for method output_type
-	37, // [37:37] is the sub-list for method input_type
-	37, // [37:37] is the sub-list for extension type_name
-	37, // [37:37] is the sub-list for extension extendee
-	0,  // [0:37] is the sub-list for field type_name
+	36, // 17: tezca.v1.ClientFrame.list_versions:type_name -> tezca.v1.ListVersions
+	39, // 18: tezca.v1.ClientFrame.get_version:type_name -> tezca.v1.GetVersion
+	0,  // 19: tezca.v1.CreateSpace.kind:type_name -> tezca.v1.SpaceKind
+	23, // 20: tezca.v1.ServerFrame.challenge:type_name -> tezca.v1.Challenge
+	24, // 21: tezca.v1.ServerFrame.auth_ok:type_name -> tezca.v1.AuthOk
+	25, // 22: tezca.v1.ServerFrame.space_list:type_name -> tezca.v1.SpaceList
+	26, // 23: tezca.v1.ServerFrame.space_created:type_name -> tezca.v1.SpaceCreated
+	27, // 24: tezca.v1.ServerFrame.doc_heads:type_name -> tezca.v1.DocHeads
+	28, // 25: tezca.v1.ServerFrame.snapshot:type_name -> tezca.v1.Snapshot
+	29, // 26: tezca.v1.ServerFrame.updates:type_name -> tezca.v1.Updates
+	30, // 27: tezca.v1.ServerFrame.sync_done:type_name -> tezca.v1.SyncDone
+	31, // 28: tezca.v1.ServerFrame.ack:type_name -> tezca.v1.Ack
+	32, // 29: tezca.v1.ServerFrame.snapshot_ack:type_name -> tezca.v1.SnapshotAck
+	33, // 30: tezca.v1.ServerFrame.awareness:type_name -> tezca.v1.AwarenessOut
+	34, // 31: tezca.v1.ServerFrame.error:type_name -> tezca.v1.Error
+	35, // 32: tezca.v1.ServerFrame.pong:type_name -> tezca.v1.Pong
+	38, // 33: tezca.v1.ServerFrame.version_list:type_name -> tezca.v1.VersionList
+	40, // 34: tezca.v1.ServerFrame.version_data:type_name -> tezca.v1.VersionData
+	2,  // 35: tezca.v1.AuthOk.role:type_name -> tezca.v1.HostRole
+	5,  // 36: tezca.v1.SpaceList.spaces:type_name -> tezca.v1.SpaceInfo
+	5,  // 37: tezca.v1.SpaceCreated.space:type_name -> tezca.v1.SpaceInfo
+	7,  // 38: tezca.v1.DocHeads.heads:type_name -> tezca.v1.DocHead
+	8,  // 39: tezca.v1.Updates.updates:type_name -> tezca.v1.Update
+	3,  // 40: tezca.v1.Error.code:type_name -> tezca.v1.ErrorCode
+	37, // 41: tezca.v1.VersionList.versions:type_name -> tezca.v1.VersionInfo
+	37, // 42: tezca.v1.VersionData.info:type_name -> tezca.v1.VersionInfo
+	43, // [43:43] is the sub-list for method output_type
+	43, // [43:43] is the sub-list for method input_type
+	43, // [43:43] is the sub-list for extension type_name
+	43, // [43:43] is the sub-list for extension extendee
+	0,  // [0:43] is the sub-list for field type_name
 }
 
 func init() { file_tezca_v1_sync_proto_init() }
@@ -2996,6 +3482,8 @@ func file_tezca_v1_sync_proto_init() {
 		(*ClientFrame_PutSnapshot)(nil),
 		(*ClientFrame_Awareness)(nil),
 		(*ClientFrame_Ping)(nil),
+		(*ClientFrame_ListVersions)(nil),
+		(*ClientFrame_GetVersion)(nil),
 	}
 	file_tezca_v1_sync_proto_msgTypes[18].OneofWrappers = []any{
 		(*ServerFrame_Challenge)(nil),
@@ -3011,6 +3499,8 @@ func file_tezca_v1_sync_proto_init() {
 		(*ServerFrame_Awareness)(nil),
 		(*ServerFrame_Error)(nil),
 		(*ServerFrame_Pong)(nil),
+		(*ServerFrame_VersionList)(nil),
+		(*ServerFrame_VersionData)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -3018,7 +3508,7 @@ func file_tezca_v1_sync_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_tezca_v1_sync_proto_rawDesc), len(file_tezca_v1_sync_proto_rawDesc)),
 			NumEnums:      4,
-			NumMessages:   32,
+			NumMessages:   37,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

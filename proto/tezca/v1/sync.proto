@@ -96,6 +96,8 @@ message ClientFrame {
     PutSnapshot put_snapshot = 10;
     AwarenessIn awareness = 11;
     Ping ping = 12;
+    ListVersions list_versions = 13;
+    GetVersion get_version = 14;
   }
 }
 
@@ -179,6 +181,8 @@ message ServerFrame {
     AwarenessOut awareness = 11;
     Error error = 12;
     Pong pong = 13;
+    VersionList version_list = 14;
+    VersionData version_data = 15;
   }
 }
 
@@ -234,6 +238,7 @@ message SyncDone {
   uint64 latest_seq = 3;
   uint32 updates_since_snapshot = 4;
   uint64 bytes_since_snapshot = 5;
+  int64 snapshot_created_at = 6;  // unix ms of the latest snapshot, 0 if none
 }
 
 message Ack {
@@ -248,6 +253,7 @@ message SnapshotAck {
   string space_id = 2;
   string doc_id = 3;
   uint64 base_seq = 4;
+  int64 created_at = 5;  // unix ms
 }
 
 message AwarenessOut {
@@ -268,3 +274,44 @@ message Error {
 }
 
 message Pong { uint64 t = 1; }
+
+// ── History (M2) ──
+
+// List a doc's retained snapshots (versions), newest first. Membership required.
+message ListVersions {
+  uint32 rid = 1;
+  string space_id = 2;
+  string doc_id = 3;
+}
+
+message VersionInfo {
+  uint64 base_seq = 1;
+  int64 created_at = 2;  // unix ms
+  bytes author = 3;      // sign_pk of the uploader
+  uint64 size = 4;       // payload bytes
+  uint32 epoch = 5;
+}
+
+message VersionList {
+  uint32 rid = 1;
+  string space_id = 2;
+  string doc_id = 3;
+  repeated VersionInfo versions = 4;
+}
+
+// Fetch one retained snapshot. Membership required. NOT_FOUND if pruned.
+message GetVersion {
+  uint32 rid = 1;
+  string space_id = 2;
+  string doc_id = 3;
+  uint64 base_seq = 4;
+}
+
+message VersionData {
+  uint32 rid = 1;
+  string space_id = 2;
+  string doc_id = 3;
+  VersionInfo info = 4;
+  bytes payload = 5;  // encrypted exactly as a Snapshot payload
+  bytes sig = 6;      // the uploader's PutSnapshot sig
+}

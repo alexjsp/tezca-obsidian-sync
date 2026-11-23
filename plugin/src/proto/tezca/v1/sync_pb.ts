@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file tezca/v1/sync.proto.
  */
 export const file_tezca_v1_sync: GenFile = /*@__PURE__*/
-  fileDesc("ChN0ZXpjYS92MS9zeW5jLnByb3RvEgh0ZXpjYS52MSIqCghTcGFjZUtleRINCgVlcG9jaBgBIAEoDRIPCgd3cmFwcGVkGAIgASgMItkBCglTcGFjZUluZm8SEAoIc3BhY2VfaWQYASABKAkSIQoEa2luZBgCIAEoDjITLnRlemNhLnYxLlNwYWNlS2luZBIhCgRyb2xlGAMgASgOMhMudGV6Y2EudjEuU3BhY2VSb2xlEg0KBWVwb2NoGAQgASgNEiAKBGtleXMYBSADKAsyEi50ZXpjYS52MS5TcGFjZUtleRIMCgRtZXRhGAYgASgMEhIKCm1ldGFfZXBvY2gYByABKA0SIQoHbWVtYmVycxgIIAMoCzIQLnRlemNhLnYxLk1lbWJlciJMCgZNZW1iZXISDwoHc2lnbl9waxgBIAEoDBIOCgZib3hfcGsYAiABKAwSIQoEcm9sZRgDIAEoDjITLnRlemNhLnYxLlNwYWNlUm9sZSJDCgdEb2NIZWFkEg4KBmRvY19pZBgBIAEoCRISCgpsYXRlc3Rfc2VxGAIgASgEEhQKDHNuYXBzaG90X3NlcRgDIAEoBCJSCgZVcGRhdGUSCwoDc2VxGAEgASgEEg0KBWVwb2NoGAIgASgNEg4KBmF1dGhvchgDIAEoDBIPCgdwYXlsb2FkGAQgASgMEgsKA3NpZxgFIAEoDCKgBAoLQ2xpZW50RnJhbWUSIAoFaGVsbG8YASABKAsyDy50ZXpjYS52MS5IZWxsb0gAEh4KBGF1dGgYAiABKAsyDi50ZXpjYS52MS5BdXRoSAASKwoLbGlzdF9zcGFjZXMYAyABKAsyFC50ZXpjYS52MS5MaXN0U3BhY2VzSAASLQoMY3JlYXRlX3NwYWNlGAQgASgLMhUudGV6Y2EudjEuQ3JlYXRlU3BhY2VIABIzCg9zdWJzY3JpYmVfc3BhY2UYBSABKAsyGC50ZXpjYS52MS5TdWJzY3JpYmVTcGFjZUgAEjcKEXVuc3Vic2NyaWJlX3NwYWNlGAYgASgLMhoudGV6Y2EudjEuVW5zdWJzY3JpYmVTcGFjZUgAEigKCXN1YnNjcmliZRgHIAEoCzITLnRlemNhLnYxLlN1YnNjcmliZUgAEiwKC3Vuc3Vic2NyaWJlGAggASgLMhUudGV6Y2EudjEuVW5zdWJzY3JpYmVIABIrCgtwdXNoX3VwZGF0ZRgJIAEoCzIULnRlemNhLnYxLlB1c2hVcGRhdGVIABItCgxwdXRfc25hcHNob3QYCiABKAsyFS50ZXpjYS52MS5QdXRTbmFwc2hvdEgAEioKCWF3YXJlbmVzcxgLIAEoCzIVLnRlemNhLnYxLkF3YXJlbmVzc0luSAASHgoEcGluZxgMIAEoCzIOLnRlemNhLnYxLlBpbmdIAEIFCgNtc2ciXQoFSGVsbG8SDwoHc2lnbl9waxgBIAEoDBIRCglkZXZpY2VfaWQYAiABKAkSGAoQcHJvdG9jb2xfdmVyc2lvbhgDIAEoDRIWCg5jbGllbnRfdmVyc2lvbhgEIAEoCSITCgRBdXRoEgsKA3NpZxgBIAEoDCIZCgpMaXN0U3BhY2VzEgsKA3JpZBgBIAEoDSJyCgtDcmVhdGVTcGFjZRILCgNyaWQYASABKA0SEAoIc3BhY2VfaWQYAiABKAkSIQoEa2luZBgDIAEoDjITLnRlemNhLnYxLlNwYWNlS2luZBITCgt3cmFwcGVkX2tleRgEIAEoDBIMCgRtZXRhGAUgASgMIiIKDlN1YnNjcmliZVNwYWNlEhAKCHNwYWNlX2lkGAEgASgJIiQKEFVuc3Vic2NyaWJlU3BhY2USEAoIc3BhY2VfaWQYASABKAkiQAoJU3Vic2NyaWJlEhAKCHNwYWNlX2lkGAEgASgJEg4KBmRvY19pZBgCIAEoCRIRCglzaW5jZV9zZXEYAyABKAQiLwoLVW5zdWJzY3JpYmUSEAoIc3BhY2VfaWQYASABKAkSDgoGZG9jX2lkGAIgASgJImgKClB1c2hVcGRhdGUSCwoDcmVmGAEgASgNEhAKCHNwYWNlX2lkGAIgASgJEg4KBmRvY19pZBgDIAEoCRINCgVlcG9jaBgEIAEoDRIPCgdwYXlsb2FkGAUgASgMEgsKA3NpZxgGIAEoDCJ7CgtQdXRTbmFwc2hvdBILCgNyZWYYASABKA0SEAoIc3BhY2VfaWQYAiABKAkSDgoGZG9jX2lkGAMgASgJEhAKCGJhc2Vfc2VxGAQgASgEEg0KBWVwb2NoGAUgASgNEg8KB3BheWxvYWQYBiABKAwSCwoDc2lnGAcgASgMIk8KC0F3YXJlbmVzc0luEhAKCHNwYWNlX2lkGAEgASgJEg4KBmRvY19pZBgCIAEoCRINCgVlcG9jaBgDIAEoDRIPCgdwYXlsb2FkGAQgASgMIhEKBFBpbmcSCQoBdBgBIAEoBCKbBAoLU2VydmVyRnJhbWUSKAoJY2hhbGxlbmdlGAEgASgLMhMudGV6Y2EudjEuQ2hhbGxlbmdlSAASIwoHYXV0aF9vaxgCIAEoCzIQLnRlemNhLnYxLkF1dGhPa0gAEikKCnNwYWNlX2xpc3QYAyABKAsyEy50ZXpjYS52MS5TcGFjZUxpc3RIABIvCg1zcGFjZV9jcmVhdGVkGAQgASgLMhYudGV6Y2EudjEuU3BhY2VDcmVhdGVkSAASJwoJZG9jX2hlYWRzGAUgASgLMhIudGV6Y2EudjEuRG9jSGVhZHNIABImCghzbmFwc2hvdBgGIAEoCzISLnRlemNhLnYxLlNuYXBzaG90SAASJAoHdXBkYXRlcxgHIAEoCzIRLnRlemNhLnYxLlVwZGF0ZXNIABInCglzeW5jX2RvbmUYCCABKAsyEi50ZXpjYS52MS5TeW5jRG9uZUgAEhwKA2FjaxgJIAEoCzINLnRlemNhLnYxLkFja0gAEi0KDHNuYXBzaG90X2FjaxgKIAEoCzIVLnRlemNhLnYxLlNuYXBzaG90QWNrSAASKwoJYXdhcmVuZXNzGAsgASgLMhYudGV6Y2EudjEuQXdhcmVuZXNzT3V0SAASIAoFZXJyb3IYDCABKAsyDy50ZXpjYS52MS5FcnJvckgAEh4KBHBvbmcYDSABKAsyDi50ZXpjYS52MS5Qb25nSABCBQoDbXNnIkcKCUNoYWxsZW5nZRINCgVub25jZRgBIAEoDBIRCglzZXJ2ZXJfaWQYAiABKAkSGAoQcHJvdG9jb2xfdmVyc2lvbhgDIAEoDSJLCgZBdXRoT2sSDwoHc2lnbl9waxgBIAEoDBIOCgZib3hfcGsYAiABKAwSIAoEcm9sZRgDIAEoDjISLnRlemNhLnYxLkhvc3RSb2xlIj0KCVNwYWNlTGlzdBILCgNyaWQYASABKA0SIwoGc3BhY2VzGAIgAygLMhMudGV6Y2EudjEuU3BhY2VJbmZvIj8KDFNwYWNlQ3JlYXRlZBILCgNyaWQYASABKA0SIgoFc3BhY2UYAiABKAsyEy50ZXpjYS52MS5TcGFjZUluZm8iTAoIRG9jSGVhZHMSEAoIc3BhY2VfaWQYASABKAkSDAoEZnVsbBgCIAEoCBIgCgVoZWFkcxgDIAMoCzIRLnRlemNhLnYxLkRvY0hlYWQiewoIU25hcHNob3QSEAoIc3BhY2VfaWQYASABKAkSDgoGZG9jX2lkGAIgASgJEhAKCGJhc2Vfc2VxGAMgASgEEg0KBWVwb2NoGAQgASgNEg4KBmF1dGhvchgFIAEoDBIPCgdwYXlsb2FkGAYgASgMEgsKA3NpZxgHIAEoDCJOCgdVcGRhdGVzEhAKCHNwYWNlX2lkGAEgASgJEg4KBmRvY19pZBgCIAEoCRIhCgd1cGRhdGVzGAMgAygLMhAudGV6Y2EudjEuVXBkYXRlIn4KCFN5bmNEb25lEhAKCHNwYWNlX2lkGAEgASgJEg4KBmRvY19pZBgCIAEoCRISCgpsYXRlc3Rfc2VxGAMgASgEEh4KFnVwZGF0ZXNfc2luY2Vfc25hcHNob3QYBCABKA0SHAoUYnl0ZXNfc2luY2Vfc25hcHNob3QYBSABKAQiQQoDQWNrEgsKA3JlZhgBIAEoDRIQCghzcGFjZV9pZBgCIAEoCRIOCgZkb2NfaWQYAyABKAkSCwoDc2VxGAQgASgEIk4KC1NuYXBzaG90QWNrEgsKA3JlZhgBIAEoDRIQCghzcGFjZV9pZBgCIAEoCRIOCgZkb2NfaWQYAyABKAkSEAoIYmFzZV9zZXEYBCABKAQicQoMQXdhcmVuZXNzT3V0EhAKCHNwYWNlX2lkGAEgASgJEg4KBmRvY19pZBgCIAEoCRINCgVlcG9jaBgDIAEoDRIMCgRmcm9tGAQgASgMEhEKCWRldmljZV9pZBgFIAEoCRIPCgdwYXlsb2FkGAYgASgMImoKBUVycm9yEgsKA3JpZBgBIAEoDRIhCgRjb2RlGAIgASgOMhMudGV6Y2EudjEuRXJyb3JDb2RlEg8KB21lc3NhZ2UYAyABKAkSEAoIc3BhY2VfaWQYBCABKAkSDgoGZG9jX2lkGAUgASgJIhEKBFBvbmcSCQoBdBgBIAEoBCpqCglTcGFjZUtpbmQSGgoWU1BBQ0VfS0lORF9VTlNQRUNJRklFRBAAEhMKD1NQQUNFX0tJTkRfUk9PVBABEhQKEFNQQUNFX0tJTkRfU0hBUkUQAhIWChJTUEFDRV9LSU5EX1BST0ZJTEUQAyprCglTcGFjZVJvbGUSGgoWU1BBQ0VfUk9MRV9VTlNQRUNJRklFRBAAEhQKEFNQQUNFX1JPTEVfT1dORVIQARIVChFTUEFDRV9ST0xFX0VESVRPUhACEhUKEVNQQUNFX1JPTEVfVklFV0VSEAMqZQoISG9zdFJvbGUSGQoVSE9TVF9ST0xFX1VOU1BFQ0lGSUVEEAASEwoPSE9TVF9ST0xFX0FETUlOEAESFAoQSE9TVF9ST0xFX01FTUJFUhACEhMKD0hPU1RfUk9MRV9HVUVTVBADKpwCCglFcnJvckNvZGUSGgoWRVJST1JfQ09ERV9VTlNQRUNJRklFRBAAEhoKFkVSUk9SX0NPREVfQkFEX1JFUVVFU1QQARIbChdFUlJPUl9DT0RFX1VOQVVUSE9SSVpFRBACEhgKFEVSUk9SX0NPREVfRk9SQklEREVOEAMSGAoURVJST1JfQ09ERV9OT1RfRk9VTkQQBBIeChpFUlJPUl9DT0RFX1VQREFURV9SRVFVSVJFRBAFEhoKFkVSUk9SX0NPREVfRVBPQ0hfU1RBTEUQBhIXChNFUlJPUl9DT0RFX0NPTkZMSUNUEAcSGAoURVJST1JfQ09ERV9UT09fTEFSR0UQCBIXChNFUlJPUl9DT0RFX0lOVEVSTkFMEAlCHVobdGV6Y2Evc2VydmVyL2ludGVybmFsL3BiO3BiYgZwcm90bzM");
+  fileDesc("ChN0ZXpjYS92MS9zeW5jLnByb3RvEgh0ZXpjYS52MSIqCghTcGFjZUtleRINCgVlcG9jaBgBIAEoDRIPCgd3cmFwcGVkGAIgASgMItkBCglTcGFjZUluZm8SEAoIc3BhY2VfaWQYASABKAkSIQoEa2luZBgCIAEoDjITLnRlemNhLnYxLlNwYWNlS2luZBIhCgRyb2xlGAMgASgOMhMudGV6Y2EudjEuU3BhY2VSb2xlEg0KBWVwb2NoGAQgASgNEiAKBGtleXMYBSADKAsyEi50ZXpjYS52MS5TcGFjZUtleRIMCgRtZXRhGAYgASgMEhIKCm1ldGFfZXBvY2gYByABKA0SIQoHbWVtYmVycxgIIAMoCzIQLnRlemNhLnYxLk1lbWJlciJMCgZNZW1iZXISDwoHc2lnbl9waxgBIAEoDBIOCgZib3hfcGsYAiABKAwSIQoEcm9sZRgDIAEoDjITLnRlemNhLnYxLlNwYWNlUm9sZSJDCgdEb2NIZWFkEg4KBmRvY19pZBgBIAEoCRISCgpsYXRlc3Rfc2VxGAIgASgEEhQKDHNuYXBzaG90X3NlcRgDIAEoBCJSCgZVcGRhdGUSCwoDc2VxGAEgASgEEg0KBWVwb2NoGAIgASgNEg4KBmF1dGhvchgDIAEoDBIPCgdwYXlsb2FkGAQgASgMEgsKA3NpZxgFIAEoDCL+BAoLQ2xpZW50RnJhbWUSIAoFaGVsbG8YASABKAsyDy50ZXpjYS52MS5IZWxsb0gAEh4KBGF1dGgYAiABKAsyDi50ZXpjYS52MS5BdXRoSAASKwoLbGlzdF9zcGFjZXMYAyABKAsyFC50ZXpjYS52MS5MaXN0U3BhY2VzSAASLQoMY3JlYXRlX3NwYWNlGAQgASgLMhUudGV6Y2EudjEuQ3JlYXRlU3BhY2VIABIzCg9zdWJzY3JpYmVfc3BhY2UYBSABKAsyGC50ZXpjYS52MS5TdWJzY3JpYmVTcGFjZUgAEjcKEXVuc3Vic2NyaWJlX3NwYWNlGAYgASgLMhoudGV6Y2EudjEuVW5zdWJzY3JpYmVTcGFjZUgAEigKCXN1YnNjcmliZRgHIAEoCzITLnRlemNhLnYxLlN1YnNjcmliZUgAEiwKC3Vuc3Vic2NyaWJlGAggASgLMhUudGV6Y2EudjEuVW5zdWJzY3JpYmVIABIrCgtwdXNoX3VwZGF0ZRgJIAEoCzIULnRlemNhLnYxLlB1c2hVcGRhdGVIABItCgxwdXRfc25hcHNob3QYCiABKAsyFS50ZXpjYS52MS5QdXRTbmFwc2hvdEgAEioKCWF3YXJlbmVzcxgLIAEoCzIVLnRlemNhLnYxLkF3YXJlbmVzc0luSAASHgoEcGluZxgMIAEoCzIOLnRlemNhLnYxLlBpbmdIABIvCg1saXN0X3ZlcnNpb25zGA0gASgLMhYudGV6Y2EudjEuTGlzdFZlcnNpb25zSAASKwoLZ2V0X3ZlcnNpb24YDiABKAsyFC50ZXpjYS52MS5HZXRWZXJzaW9uSABCBQoDbXNnIl0KBUhlbGxvEg8KB3NpZ25fcGsYASABKAwSEQoJZGV2aWNlX2lkGAIgASgJEhgKEHByb3RvY29sX3ZlcnNpb24YAyABKA0SFgoOY2xpZW50X3ZlcnNpb24YBCABKAkiEwoEQXV0aBILCgNzaWcYASABKAwiGQoKTGlzdFNwYWNlcxILCgNyaWQYASABKA0icgoLQ3JlYXRlU3BhY2USCwoDcmlkGAEgASgNEhAKCHNwYWNlX2lkGAIgASgJEiEKBGtpbmQYAyABKA4yEy50ZXpjYS52MS5TcGFjZUtpbmQSEwoLd3JhcHBlZF9rZXkYBCABKAwSDAoEbWV0YRgFIAEoDCIiCg5TdWJzY3JpYmVTcGFjZRIQCghzcGFjZV9pZBgBIAEoCSIkChBVbnN1YnNjcmliZVNwYWNlEhAKCHNwYWNlX2lkGAEgASgJIkAKCVN1YnNjcmliZRIQCghzcGFjZV9pZBgBIAEoCRIOCgZkb2NfaWQYAiABKAkSEQoJc2luY2Vfc2VxGAMgASgEIi8KC1Vuc3Vic2NyaWJlEhAKCHNwYWNlX2lkGAEgASgJEg4KBmRvY19pZBgCIAEoCSJoCgpQdXNoVXBkYXRlEgsKA3JlZhgBIAEoDRIQCghzcGFjZV9pZBgCIAEoCRIOCgZkb2NfaWQYAyABKAkSDQoFZXBvY2gYBCABKA0SDwoHcGF5bG9hZBgFIAEoDBILCgNzaWcYBiABKAwiewoLUHV0U25hcHNob3QSCwoDcmVmGAEgASgNEhAKCHNwYWNlX2lkGAIgASgJEg4KBmRvY19pZBgDIAEoCRIQCghiYXNlX3NlcRgEIAEoBBINCgVlcG9jaBgFIAEoDRIPCgdwYXlsb2FkGAYgASgMEgsKA3NpZxgHIAEoDCJPCgtBd2FyZW5lc3NJbhIQCghzcGFjZV9pZBgBIAEoCRIOCgZkb2NfaWQYAiABKAkSDQoFZXBvY2gYAyABKA0SDwoHcGF5bG9hZBgEIAEoDCIRCgRQaW5nEgkKAXQYASABKAQi+QQKC1NlcnZlckZyYW1lEigKCWNoYWxsZW5nZRgBIAEoCzITLnRlemNhLnYxLkNoYWxsZW5nZUgAEiMKB2F1dGhfb2sYAiABKAsyEC50ZXpjYS52MS5BdXRoT2tIABIpCgpzcGFjZV9saXN0GAMgASgLMhMudGV6Y2EudjEuU3BhY2VMaXN0SAASLwoNc3BhY2VfY3JlYXRlZBgEIAEoCzIWLnRlemNhLnYxLlNwYWNlQ3JlYXRlZEgAEicKCWRvY19oZWFkcxgFIAEoCzISLnRlemNhLnYxLkRvY0hlYWRzSAASJgoIc25hcHNob3QYBiABKAsyEi50ZXpjYS52MS5TbmFwc2hvdEgAEiQKB3VwZGF0ZXMYByABKAsyES50ZXpjYS52MS5VcGRhdGVzSAASJwoJc3luY19kb25lGAggASgLMhIudGV6Y2EudjEuU3luY0RvbmVIABIcCgNhY2sYCSABKAsyDS50ZXpjYS52MS5BY2tIABItCgxzbmFwc2hvdF9hY2sYCiABKAsyFS50ZXpjYS52MS5TbmFwc2hvdEFja0gAEisKCWF3YXJlbmVzcxgLIAEoCzIWLnRlemNhLnYxLkF3YXJlbmVzc091dEgAEiAKBWVycm9yGAwgASgLMg8udGV6Y2EudjEuRXJyb3JIABIeCgRwb25nGA0gASgLMg4udGV6Y2EudjEuUG9uZ0gAEi0KDHZlcnNpb25fbGlzdBgOIAEoCzIVLnRlemNhLnYxLlZlcnNpb25MaXN0SAASLQoMdmVyc2lvbl9kYXRhGA8gASgLMhUudGV6Y2EudjEuVmVyc2lvbkRhdGFIAEIFCgNtc2ciRwoJQ2hhbGxlbmdlEg0KBW5vbmNlGAEgASgMEhEKCXNlcnZlcl9pZBgCIAEoCRIYChBwcm90b2NvbF92ZXJzaW9uGAMgASgNIksKBkF1dGhPaxIPCgdzaWduX3BrGAEgASgMEg4KBmJveF9waxgCIAEoDBIgCgRyb2xlGAMgASgOMhIudGV6Y2EudjEuSG9zdFJvbGUiPQoJU3BhY2VMaXN0EgsKA3JpZBgBIAEoDRIjCgZzcGFjZXMYAiADKAsyEy50ZXpjYS52MS5TcGFjZUluZm8iPwoMU3BhY2VDcmVhdGVkEgsKA3JpZBgBIAEoDRIiCgVzcGFjZRgCIAEoCzITLnRlemNhLnYxLlNwYWNlSW5mbyJMCghEb2NIZWFkcxIQCghzcGFjZV9pZBgBIAEoCRIMCgRmdWxsGAIgASgIEiAKBWhlYWRzGAMgAygLMhEudGV6Y2EudjEuRG9jSGVhZCJ7CghTbmFwc2hvdBIQCghzcGFjZV9pZBgBIAEoCRIOCgZkb2NfaWQYAiABKAkSEAoIYmFzZV9zZXEYAyABKAQSDQoFZXBvY2gYBCABKA0SDgoGYXV0aG9yGAUgASgMEg8KB3BheWxvYWQYBiABKAwSCwoDc2lnGAcgASgMIk4KB1VwZGF0ZXMSEAoIc3BhY2VfaWQYASABKAkSDgoGZG9jX2lkGAIgASgJEiEKB3VwZGF0ZXMYAyADKAsyEC50ZXpjYS52MS5VcGRhdGUimwEKCFN5bmNEb25lEhAKCHNwYWNlX2lkGAEgASgJEg4KBmRvY19pZBgCIAEoCRISCgpsYXRlc3Rfc2VxGAMgASgEEh4KFnVwZGF0ZXNfc2luY2Vfc25hcHNob3QYBCABKA0SHAoUYnl0ZXNfc2luY2Vfc25hcHNob3QYBSABKAQSGwoTc25hcHNob3RfY3JlYXRlZF9hdBgGIAEoAyJBCgNBY2sSCwoDcmVmGAEgASgNEhAKCHNwYWNlX2lkGAIgASgJEg4KBmRvY19pZBgDIAEoCRILCgNzZXEYBCABKAQiYgoLU25hcHNob3RBY2sSCwoDcmVmGAEgASgNEhAKCHNwYWNlX2lkGAIgASgJEg4KBmRvY19pZBgDIAEoCRIQCghiYXNlX3NlcRgEIAEoBBISCgpjcmVhdGVkX2F0GAUgASgDInEKDEF3YXJlbmVzc091dBIQCghzcGFjZV9pZBgBIAEoCRIOCgZkb2NfaWQYAiABKAkSDQoFZXBvY2gYAyABKA0SDAoEZnJvbRgEIAEoDBIRCglkZXZpY2VfaWQYBSABKAkSDwoHcGF5bG9hZBgGIAEoDCJqCgVFcnJvchILCgNyaWQYASABKA0SIQoEY29kZRgCIAEoDjITLnRlemNhLnYxLkVycm9yQ29kZRIPCgdtZXNzYWdlGAMgASgJEhAKCHNwYWNlX2lkGAQgASgJEg4KBmRvY19pZBgFIAEoCSIRCgRQb25nEgkKAXQYASABKAQiPQoMTGlzdFZlcnNpb25zEgsKA3JpZBgBIAEoDRIQCghzcGFjZV9pZBgCIAEoCRIOCgZkb2NfaWQYAyABKAkiYAoLVmVyc2lvbkluZm8SEAoIYmFzZV9zZXEYASABKAQSEgoKY3JlYXRlZF9hdBgCIAEoAxIOCgZhdXRob3IYAyABKAwSDAoEc2l6ZRgEIAEoBBINCgVlcG9jaBgFIAEoDSJlCgtWZXJzaW9uTGlzdBILCgNyaWQYASABKA0SEAoIc3BhY2VfaWQYAiABKAkSDgoGZG9jX2lkGAMgASgJEicKCHZlcnNpb25zGAQgAygLMhUudGV6Y2EudjEuVmVyc2lvbkluZm8iTQoKR2V0VmVyc2lvbhILCgNyaWQYASABKA0SEAoIc3BhY2VfaWQYAiABKAkSDgoGZG9jX2lkGAMgASgJEhAKCGJhc2Vfc2VxGAQgASgEIn8KC1ZlcnNpb25EYXRhEgsKA3JpZBgBIAEoDRIQCghzcGFjZV9pZBgCIAEoCRIOCgZkb2NfaWQYAyABKAkSIwoEaW5mbxgEIAEoCzIVLnRlemNhLnYxLlZlcnNpb25JbmZvEg8KB3BheWxvYWQYBSABKAwSCwoDc2lnGAYgASgMKmoKCVNwYWNlS2luZBIaChZTUEFDRV9LSU5EX1VOU1BFQ0lGSUVEEAASEwoPU1BBQ0VfS0lORF9ST09UEAESFAoQU1BBQ0VfS0lORF9TSEFSRRACEhYKElNQQUNFX0tJTkRfUFJPRklMRRADKmsKCVNwYWNlUm9sZRIaChZTUEFDRV9ST0xFX1VOU1BFQ0lGSUVEEAASFAoQU1BBQ0VfUk9MRV9PV05FUhABEhUKEVNQQUNFX1JPTEVfRURJVE9SEAISFQoRU1BBQ0VfUk9MRV9WSUVXRVIQAyplCghIb3N0Um9sZRIZChVIT1NUX1JPTEVfVU5TUEVDSUZJRUQQABITCg9IT1NUX1JPTEVfQURNSU4QARIUChBIT1NUX1JPTEVfTUVNQkVSEAISEwoPSE9TVF9ST0xFX0dVRVNUEAMqnAIKCUVycm9yQ29kZRIaChZFUlJPUl9DT0RFX1VOU1BFQ0lGSUVEEAASGgoWRVJST1JfQ09ERV9CQURfUkVRVUVTVBABEhsKF0VSUk9SX0NPREVfVU5BVVRIT1JJWkVEEAISGAoURVJST1JfQ09ERV9GT1JCSURERU4QAxIYChRFUlJPUl9DT0RFX05PVF9GT1VORBAEEh4KGkVSUk9SX0NPREVfVVBEQVRFX1JFUVVJUkVEEAUSGgoWRVJST1JfQ09ERV9FUE9DSF9TVEFMRRAGEhcKE0VSUk9SX0NPREVfQ09ORkxJQ1QQBxIYChRFUlJPUl9DT0RFX1RPT19MQVJHRRAIEhcKE0VSUk9SX0NPREVfSU5URVJOQUwQCUIdWht0ZXpjYS9zZXJ2ZXIvaW50ZXJuYWwvcGI7cGJiBnByb3RvMw");
 
 /**
  * @generated from message tezca.v1.SpaceKey
@@ -281,6 +281,18 @@ export type ClientFrame = Message<"tezca.v1.ClientFrame"> & {
      */
     value: Ping;
     case: "ping";
+  } | {
+    /**
+     * @generated from field: tezca.v1.ListVersions list_versions = 13;
+     */
+    value: ListVersions;
+    case: "listVersions";
+  } | {
+    /**
+     * @generated from field: tezca.v1.GetVersion get_version = 14;
+     */
+    value: GetVersion;
+    case: "getVersion";
   } | { case: undefined; value?: undefined };
 };
 
@@ -712,6 +724,18 @@ export type ServerFrame = Message<"tezca.v1.ServerFrame"> & {
      */
     value: Pong;
     case: "pong";
+  } | {
+    /**
+     * @generated from field: tezca.v1.VersionList version_list = 14;
+     */
+    value: VersionList;
+    case: "versionList";
+  } | {
+    /**
+     * @generated from field: tezca.v1.VersionData version_data = 15;
+     */
+    value: VersionData;
+    case: "versionData";
   } | { case: undefined; value?: undefined };
 };
 
@@ -954,6 +978,13 @@ export type SyncDone = Message<"tezca.v1.SyncDone"> & {
    * @generated from field: uint64 bytes_since_snapshot = 5;
    */
   bytesSinceSnapshot: bigint;
+
+  /**
+   * unix ms of the latest snapshot, 0 if none
+   *
+   * @generated from field: int64 snapshot_created_at = 6;
+   */
+  snapshotCreatedAt: bigint;
 };
 
 /**
@@ -1018,6 +1049,13 @@ export type SnapshotAck = Message<"tezca.v1.SnapshotAck"> & {
    * @generated from field: uint64 base_seq = 4;
    */
   baseSeq: bigint;
+
+  /**
+   * unix ms
+   *
+   * @generated from field: int64 created_at = 5;
+   */
+  createdAt: bigint;
 };
 
 /**
@@ -1126,6 +1164,190 @@ export type Pong = Message<"tezca.v1.Pong"> & {
  */
 export const PongSchema: GenMessage<Pong> = /*@__PURE__*/
   messageDesc(file_tezca_v1_sync, 31);
+
+/**
+ * List a doc's retained snapshots (versions), newest first. Membership required.
+ *
+ * @generated from message tezca.v1.ListVersions
+ */
+export type ListVersions = Message<"tezca.v1.ListVersions"> & {
+  /**
+   * @generated from field: uint32 rid = 1;
+   */
+  rid: number;
+
+  /**
+   * @generated from field: string space_id = 2;
+   */
+  spaceId: string;
+
+  /**
+   * @generated from field: string doc_id = 3;
+   */
+  docId: string;
+};
+
+/**
+ * Describes the message tezca.v1.ListVersions.
+ * Use `create(ListVersionsSchema)` to create a new message.
+ */
+export const ListVersionsSchema: GenMessage<ListVersions> = /*@__PURE__*/
+  messageDesc(file_tezca_v1_sync, 32);
+
+/**
+ * @generated from message tezca.v1.VersionInfo
+ */
+export type VersionInfo = Message<"tezca.v1.VersionInfo"> & {
+  /**
+   * @generated from field: uint64 base_seq = 1;
+   */
+  baseSeq: bigint;
+
+  /**
+   * unix ms
+   *
+   * @generated from field: int64 created_at = 2;
+   */
+  createdAt: bigint;
+
+  /**
+   * sign_pk of the uploader
+   *
+   * @generated from field: bytes author = 3;
+   */
+  author: Uint8Array;
+
+  /**
+   * payload bytes
+   *
+   * @generated from field: uint64 size = 4;
+   */
+  size: bigint;
+
+  /**
+   * @generated from field: uint32 epoch = 5;
+   */
+  epoch: number;
+};
+
+/**
+ * Describes the message tezca.v1.VersionInfo.
+ * Use `create(VersionInfoSchema)` to create a new message.
+ */
+export const VersionInfoSchema: GenMessage<VersionInfo> = /*@__PURE__*/
+  messageDesc(file_tezca_v1_sync, 33);
+
+/**
+ * @generated from message tezca.v1.VersionList
+ */
+export type VersionList = Message<"tezca.v1.VersionList"> & {
+  /**
+   * @generated from field: uint32 rid = 1;
+   */
+  rid: number;
+
+  /**
+   * @generated from field: string space_id = 2;
+   */
+  spaceId: string;
+
+  /**
+   * @generated from field: string doc_id = 3;
+   */
+  docId: string;
+
+  /**
+   * @generated from field: repeated tezca.v1.VersionInfo versions = 4;
+   */
+  versions: VersionInfo[];
+};
+
+/**
+ * Describes the message tezca.v1.VersionList.
+ * Use `create(VersionListSchema)` to create a new message.
+ */
+export const VersionListSchema: GenMessage<VersionList> = /*@__PURE__*/
+  messageDesc(file_tezca_v1_sync, 34);
+
+/**
+ * Fetch one retained snapshot. Membership required. NOT_FOUND if pruned.
+ *
+ * @generated from message tezca.v1.GetVersion
+ */
+export type GetVersion = Message<"tezca.v1.GetVersion"> & {
+  /**
+   * @generated from field: uint32 rid = 1;
+   */
+  rid: number;
+
+  /**
+   * @generated from field: string space_id = 2;
+   */
+  spaceId: string;
+
+  /**
+   * @generated from field: string doc_id = 3;
+   */
+  docId: string;
+
+  /**
+   * @generated from field: uint64 base_seq = 4;
+   */
+  baseSeq: bigint;
+};
+
+/**
+ * Describes the message tezca.v1.GetVersion.
+ * Use `create(GetVersionSchema)` to create a new message.
+ */
+export const GetVersionSchema: GenMessage<GetVersion> = /*@__PURE__*/
+  messageDesc(file_tezca_v1_sync, 35);
+
+/**
+ * @generated from message tezca.v1.VersionData
+ */
+export type VersionData = Message<"tezca.v1.VersionData"> & {
+  /**
+   * @generated from field: uint32 rid = 1;
+   */
+  rid: number;
+
+  /**
+   * @generated from field: string space_id = 2;
+   */
+  spaceId: string;
+
+  /**
+   * @generated from field: string doc_id = 3;
+   */
+  docId: string;
+
+  /**
+   * @generated from field: tezca.v1.VersionInfo info = 4;
+   */
+  info?: VersionInfo | undefined;
+
+  /**
+   * encrypted exactly as a Snapshot payload
+   *
+   * @generated from field: bytes payload = 5;
+   */
+  payload: Uint8Array;
+
+  /**
+   * the uploader's PutSnapshot sig
+   *
+   * @generated from field: bytes sig = 6;
+   */
+  sig: Uint8Array;
+};
+
+/**
+ * Describes the message tezca.v1.VersionData.
+ * Use `create(VersionDataSchema)` to create a new message.
+ */
+export const VersionDataSchema: GenMessage<VersionData> = /*@__PURE__*/
+  messageDesc(file_tezca_v1_sync, 36);
 
 /**
  * @generated from enum tezca.v1.SpaceKind
