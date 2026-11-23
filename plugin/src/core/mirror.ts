@@ -986,6 +986,10 @@ export class DiskMirror {
 			.sort((a, b) => b.path.length - a.path.length);
 		for (const f of deadFolders) {
 			const vp = this.toVault(f.path);
+			// Never touch a folder that isn't ours (e.g. the root space's tombstone for a folder that
+			// became a share: removing it while empty would unmount the share).
+			if (!this.inScope(vp, "folder")) continue;
+			if (this.opts.excluded?.().some((m) => m === vp || m.startsWith(vp + "/"))) continue;
 			if (!(await this.vault.exists(vp))) continue;
 			const prefix = vp + "/";
 			const items = await this.vault.list();
