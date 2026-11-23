@@ -202,3 +202,44 @@ Not done in M2:
   after a grace period).
 - Large-file streaming. Blobs are encrypted whole in memory, fine at the 100 MB default cap.
 - Versions of attachments are kept only in the index (last 20), not on a time schedule.
+
+### M3: shared folders on one host (built 2026-11-23)
+- **Model:** a share is its own space mounted at a vault folder. The mount table lives in the user's root
+  space index (`mounts`), so all their devices mount the same shares at the same paths. The engine runs one
+  mirror per mounted space over one connection; the root mirror skips mounted folders.
+- **Converting a folder:** one root-index transaction adds the mount and tombstones the folder's root
+  entries (other devices only drop baselines for paths that are now inside a mount, never delete files).
+  The share's mirror then imports what's on disk. A share mounted for the first time on a device waits
+  for the share's index from the host before reconciling, so files already on disk aren't duplicated.
+- **Invites:** single-use links (`do=share`) carrying a secret that unwraps pre-wrapped keys for every
+  epoch; the joiner re-wraps them for their own box key so their other devices get them; they choose the
+  mount folder. Invitees must already have an account on the host (guests are M4).
+- **Roles:** owner/editor/viewer, enforced by the server on every write. Viewers' editors are read-only;
+  local changes in a view-only share are reverted (edits kept as local conflict copies, new files kept
+  local-only).
+- **Removal:** owner removes, then rotates the key (new epoch wrapped for every remaining member); the
+  server ends the removed member's subscriptions and pushes `SpaceChanged`. Pending updates under the old
+  epoch are re-sent under the new key. Removed members (and members who leave) keep their copy as private
+  files.
+- **Mount folder:** moving it moves the mount on all the user's devices (each device moves its folder on
+  disk before remounting). Deleting it, even while Obsidian is closed, unmounts the share for that user
+  and never deletes the share's files for others.
+- **Presence:** members write their display name and colour into the share (`members` map); cursors and
+  the status-bar avatars use them.
+- **Moves across a share's edge** are copy + delete (by design), with a notice.
+- **Tests:** `plugin/test/real/` runs engines against the real Go server (sharing, viewers, removal with
+  key rotation, leaving, deleting and moving mounts). Simulator `--shares`: two users, a shared folder,
+  convergence per user and across users for the share.
+
+Found by tests/simulator during M3: moving a mount on another device would have read every file as
+deleted (fixed by moving the folder on disk first); a mount folder deleted while closed would have
+deleted the share's files for everyone (now unmounts); a second device of a new member could mount
+before its key arrived and crash on push (now waits; pushes never throw for a missing key); push refs
+were numbered per space, so errors on a shared connection could be claimed by the wrong space.
+
+Not done in M3:
+- Signed membership: the host could still lie about the member list to an owner rotating keys (it can't
+  read content, but it could get a key wrapped for an extra member). Owners see the member list before
+  removing; a signed membership log is future work.
+- Invites need an existing host account; cross-host shares and guests are M4.
+- "Require approval" for invites.

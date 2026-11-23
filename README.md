@@ -2,15 +2,16 @@
 
 # Tezca
 
-Self-hosted, live, end-to-end encrypted sync for Obsidian, with real-time collaboration (multiplayer shared folders are coming in M3).
+Self-hosted, live, end-to-end encrypted sync for Obsidian, with real-time collaboration in shared folders.
 
 - **Live:** keystroke-level sync via Yjs CRDTs. Cursors of your other devices show up in open notes.
 - **End-to-end encrypted:** the host stores and relays ciphertext only. It never sees paths, content or cursors.
 - **Attachments:** images, PDFs and every other file sync too, encrypted, with earlier versions kept.
+- **Shared folders:** share any folder with other people on your host. Live multiplayer editing with cursors, owner/editor/viewer roles, invite links, and key rotation when someone is removed.
 - **History:** notes keep hourly and daily versions on the host; restore any version, or bring back deleted files.
 - **Self-hosted:** a single small Go binary / Docker container with SQLite (attachments on disk or any S3-compatible store). Nothing else to run.
 
-Status: **M2 (attachments and history)**. See [docs/plan.md](docs/plan.md).
+Status: **M3 (shared folders on one host)**. See [docs/plan.md](docs/plan.md).
 
 ## Repository
 
