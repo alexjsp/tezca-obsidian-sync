@@ -1,5 +1,6 @@
 import { App, PluginSettingTab, Setting } from "obsidian";
 import type TezcaPlugin from "../main";
+import { ShareModal } from "./share-modal";
 import { log } from "../core/util";
 
 export class TezcaSettingTab extends PluginSettingTab {
@@ -55,10 +56,31 @@ export class TezcaSettingTab extends PluginSettingTab {
 					.setDesc("Create a one-time invite link so someone else can use this host.")
 					.addButton((b) => b.setButtonText("Create invite").onClick(() => void p.createInvite()));
 
+			containerEl.createEl("h3", { text: "Shared folders" });
+			const mounts = p.engine?.mounts?.all() ?? [];
+			if (!mounts.length)
+				containerEl.createEl("p", {
+					cls: "setting-item-description",
+					text: "None yet. Right-click a folder and choose \"Share folder…\" to share it with someone on this host.",
+				});
+			for (const m of mounts) {
+				const sh = p.engine?.shares.get(m.spaceId);
+				const role = p.engine?.roleIn(m.spaceId);
+				new Setting(containerEl)
+					.setName(m.path)
+					.setDesc(sh ? `${sh.space.meta?.name ?? ""}${role ? ` · you're ${role === "owner" ? "an owner" : `a${role === "editor" ? "n editor" : " viewer"}`}` : ""}` : "Connecting…")
+					.addButton((b) =>
+						b
+							.setButtonText("Manage")
+							.setDisabled(!sh)
+							.onClick(() => new ShareModal(this.app, p.engine!, m.spaceId).open()),
+					);
+			}
+
 			containerEl.createEl("h3", { text: "Presence" });
 			new Setting(containerEl)
 				.setName("Display name")
-				.setDesc("Shown next to your cursor on other devices.")
+				.setDesc("Shown next to your cursor, and to the other members of your shared folders.")
 				.addText((t) =>
 					t
 						.setPlaceholder(p.settings.deviceName)
@@ -67,6 +89,7 @@ export class TezcaSettingTab extends PluginSettingTab {
 							p.settings.displayName = v.trim();
 							await p.saveSettings();
 							p.editors.updateUser();
+							p.engine?.updateProfile();
 						}),
 				);
 			new Setting(containerEl)
@@ -83,6 +106,7 @@ export class TezcaSettingTab extends PluginSettingTab {
 					p.settings.color = v;
 					await p.saveSettings();
 					p.editors.updateUser();
+					p.engine?.updateProfile();
 				}),
 			);
 
