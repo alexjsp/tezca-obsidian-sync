@@ -193,6 +193,8 @@ stale copy after other devices' edits had already synced (edits only protect a f
 possibly misattributed by the simulator. The text stays in the doc and "Recently deleted" restores it. Needs
 a decision: should an edit made after (in wall-clock terms) a concurrent offline delete revive the file?
 
+Verified in real use (0.2.0): Mac uploaded 295 attachments (50 MB) to the Unraid host; iPhone downloaded them.
+
 Not done in M2:
 - Blob garbage collection. The server keeps every blob; the host can't see which ones the encrypted index still
   references, so GC has to be client-driven (an owner device lists live references, the server deletes the rest
