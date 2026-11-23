@@ -1,0 +1,16 @@
+# Unraid deployment, used by `just deploy-unraid` (scripts/deploy-unraid).
+# Plain HTTP on host port 8089; Nginx Proxy Manager terminates TLS for TEZCA_PUBLIC_URL.
+services:
+  tezca:
+    build:
+      context: ../server
+      dockerfile: ../deploy/Dockerfile
+    image: tezca-server:local
+    restart: unless-stopped
+    ports:
+      - "${TEZCA_PORT:-8089}:8080"
+    environment:
+      TEZCA_PUBLIC_URL: ${TEZCA_PUBLIC_URL:-https://tezca.jsp.scot}
+      TEZCA_SERVER_NAME: ${TEZCA_SERVER_NAME:-Tezca}
+    volumes:
+      - ${TEZCA_DATA:-/mnt/user/appdata/tezca}:/data
