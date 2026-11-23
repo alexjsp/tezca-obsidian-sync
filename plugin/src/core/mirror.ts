@@ -7,7 +7,7 @@ import { REMOTE_ORIGIN, type DocSync } from "./doc-sync";
 import { IndexModel, canonicalPath, type Entry } from "./index-model";
 import { INDEX_DOC, type SpaceSync } from "./space";
 import { applyCanvas, canvasText, sameCanvas } from "./canvas";
-import { applyTextDiff, threeWayMerge } from "./text-diff";
+import { applyTextDiff, retained, threeWayMerge } from "./text-diff";
 import type { VaultAdapter, VaultEvent } from "./vault";
 import { Emitter, log, Semaphore } from "./util";
 
@@ -146,6 +146,8 @@ export class DiskMirror {
 	 * re-create the file (it would then be left behind, untracked, once the event is handled).
 	 */
 	private goingAway = new Map<string, number>();
+	/** Paths removed by events buffered during startup (until those events are dispatched). */
+	private earlyGone = new Set<string>();
 	// Blob transfers run outside the serial queue; verifyBlob picks up their results.
 	private downloaded = new Map<string, Uint8Array>(); // blob id → plaintext ready to write
 	private downloadedBytes = 0;
@@ -235,12 +237,14 @@ export class DiskMirror {
 		// (which detached the note from everyone else's concurrent edits).
 		const before = this.early;
 		this.early = [];
+		this.earlyGone.clear();
 		for (const ev of before) this.dispatchEvent(ev);
 		await this.enqueue(() => this.reconcileAll());
 		this.ready = true;
 		const during = this.early;
 		this.early = [];
 		for (const ev of during) this.onVaultEvent(ev);
+		this.earlyGone.clear();
 		for (const d of this.space.staleDocs()) if (d !== INDEX_DOC) this.fetchRemote(d);
 		const first = this.touched.values().next();
 		if (!first.done) this.touch(first.value);
@@ -478,7 +482,7 @@ export class DiskMirror {
 		// 1. deterministic resolution of path collisions in the index
 		const { renames } = this.index.resolvePaths();
 		for (const r of renames) this.index.setPath(r.id, r.path, LOCAL_ORIGIN);
-		const { byPath } = this.index.resolvePaths();
+		let { byPath } = this.index.resolvePaths();
 
 		const disk = await this.vault.list();
 		const diskFiles = new Map<string, string>(); // canonical rel → actual vault path
@@ -488,6 +492,7 @@ export class DiskMirror {
 			const rel = this.toRel(item.path)!;
 			(item.kind === "file" ? diskFiles : diskFolders).set(canonicalPath(rel), item.path);
 		}
+		if (await this.detectOfflineRenames(byPath, diskFiles)) byPath = this.index.resolvePaths().byPath;
 
 		const plan: (() => Promise<void>)[] = [];
 		let overwrites = 0;
@@ -574,6 +579,65 @@ export class DiskMirror {
 
 	private brakeEngaged = false;
 
+	/**
+	 * Renames made while we weren't running (Obsidian closed, or before its event was handled):
+	 * a tracked file missing from its path plus an untracked file with exactly its last-synced
+	 * content is the same file, moved. Recording it as a rename (not a delete plus a new file)
+	 * keeps the file attached to other devices' concurrent edits.
+	 */
+	private async detectOfflineRenames(byPath: Map<string, Entry>, diskFiles: Map<string, string>): Promise<boolean> {
+		const missing: Entry[] = [];
+		for (const e of byPath.values()) {
+			if (e.kind === "folder") continue;
+			const base = this.state.baselines[e.id];
+			if (!base || base.path !== e.path || diskFiles.has(canonicalPath(e.path))) continue;
+			if (!this.inScope(this.toVault(e.path), "file")) continue;
+			missing.push(e);
+		}
+		if (!missing.length) return false;
+		const tombs = new Set(this.index.all().filter((e) => e.deleted).map((e) => canonicalPath(e.path)));
+		const baseTexts = new Map<string, string | null>();
+		let moved = false;
+		for (const [k, vp] of diskFiles) {
+			if (!missing.length) break;
+			if (byPath.has(k) || tombs.has(k)) continue; // tracked, or deleted elsewhere
+			const rel = this.toRel(vp)!;
+			const kind = fileKind(rel);
+			let match: Entry | undefined;
+			if (kind === "blob") {
+				// Attachments: exactly the last-synced bytes.
+				const h = await this.diskHash(vp, "blob");
+				const c = missing.filter((e) => e.kind === "blob" && this.state.baselines[e.id].hash === h);
+				if (c.length === 1) match = c[0];
+			} else {
+				// Notes/canvases may also have been edited while closed: the clearly most similar
+				// last-synced text, if similar enough.
+				const D = await this.vault.read(vp);
+				if (D === null) continue;
+				const scored: [Entry, number][] = [];
+				for (const e of missing) {
+					if (e.kind !== kind) continue;
+					if (!baseTexts.has(e.id)) baseTexts.set(e.id, await this.baselineText(e.id, this.state.baselines[e.id]));
+					const B = baseTexts.get(e.id);
+					// How much of the last-synced text is still there (edits made while closed are fine).
+					const score = this.state.baselines[e.id].hash === fingerprint(D) ? 1 : B === null || B === undefined ? 0 : retained(B, D);
+					scored.push([e, score]);
+				}
+				scored.sort((x, y) => y[1] - x[1]);
+				if (scored.length && scored[0][1] >= 0.7 && (scored.length === 1 || scored[0][1] - scored[1][1] >= 0.15)) match = scored[0][0];
+			}
+			if (!match) continue;
+			missing.splice(missing.indexOf(match), 1);
+			await this.ensureFolderEntries(rel);
+			this.index.setPath(match.id, rel, LOCAL_ORIGIN);
+			this.state.baselines[match.id] = { ...this.state.baselines[match.id], path: rel };
+			moved = true;
+			log.info(`${match.path} was moved to ${rel} while sync wasn't running`);
+		}
+		if (moved) this.scheduleStateSave();
+		return moved;
+	}
+
 	/** Dry-run classification used by the safety brake. */
 	private async peekFile(e: Entry, vp: string, base: Baseline | undefined, onDisk: boolean): Promise<"none" | "overwrite" | "delete"> {
 		if (!onDisk) return base ? "delete" : "none";
@@ -597,6 +661,7 @@ export class DiskMirror {
 	/** Startup reconcile of a blob entry: detect offline deletes, then verify. */
 	private async reconcileBlob(e: Entry, vp: string, base: Baseline | undefined): Promise<void> {
 		if (base && !(await this.vault.exists(vp))) {
+			if (this.removedLocally(vp)) return; // a local delete/move of it is queued
 			// Deleted while we were not running. A newer remote version beats the delete.
 			if (this.brakeEngaged) return;
 			if (!e.blob || e.blob.hash === base.hash) {
@@ -626,6 +691,7 @@ export class DiskMirror {
 			const C = model.read(doc);
 			const D = await this.vault.read(vp);
 			if (D === null) {
+				if (base && this.removedLocally(vp)) return; // a local delete/move of it is queued
 				if (base) {
 					// Previously materialized here and now gone: deleted while we were not running.
 					if (fingerprint(C) === base.hash || !doc.isSynced) {
@@ -726,11 +792,19 @@ export class DiskMirror {
 		if (this.stopped) return;
 		if (!this.ready) {
 			// Before the startup reconcile finishes: keep the event (e.g. the user typing or renaming
-			// during startup) and apply it at the right point, rather than losing it.
+			// during startup) and apply it at the right point, rather than losing it. A path it
+			// removes is marked now, so the reconcile doesn't read it as "deleted while closed".
 			if (this.early.length < 10_000) this.early.push(ev);
+			const gone = ev.type === "delete" ? ev.path : ev.type === "rename" ? ev.oldPath : null;
+			if (gone) this.earlyGone.add(gone);
 			return;
 		}
 		this.dispatchEvent(ev);
+	}
+
+	/** Is a local delete/move of this path waiting to be handled? */
+	private removedLocally(vp: string): boolean {
+		return this.goingAway.has(vp) || this.earlyGone.has(vp);
 	}
 
 	private dispatchEvent(ev: VaultEvent) {
@@ -1217,7 +1291,7 @@ export class DiskMirror {
 				return;
 			}
 			if (D === null) {
-				if (this.goingAway.has(vp)) return; // a local delete/move of this file is queued
+				if (this.removedLocally(vp)) return; // a local delete/move of this file is queued
 				await this.selfWrite(vp, C, null);
 				await this.setBaseline(id, e.path, C);
 				return;
@@ -1335,7 +1409,7 @@ export class DiskMirror {
 			return;
 		}
 		if (D === null) {
-			if (this.goingAway.has(vp)) return; // a local delete/move of this file is queued
+			if (this.removedLocally(vp)) return; // a local delete/move of this file is queued
 			await this.writeRemoteBlob(e, C, null);
 			return;
 		}

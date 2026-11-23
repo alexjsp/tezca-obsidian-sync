@@ -272,6 +272,26 @@ describe("sync engine (mock host)", () => {
 		expect(engine.mirror!.index.live().filter((e) => e.kind === "md").length).toBe(1);
 	});
 
+	it("restart: a file moved (and edited) while closed stays the same note", async () => {
+		const { host, id, spaceId, a, b } = await pair({ a: { "notes/n.md": "one\ntwo\nthree\nfour\n" } });
+		await converged(a, b);
+		await b.engine.stop();
+		clients = clients.filter((c) => c !== b);
+		// While B is closed: the file is moved and edited on disk; meanwhile A edits it too.
+		const text = b.vault.files.get("notes/n.md") as string;
+		b.vault.files.delete("notes/n.md");
+		b.vault.files.set("archive/n.md", text + "five (moved and edited while closed)\n");
+		b.vault.folders.add("archive");
+		await a.vault.userWrite("notes/n.md", "ONE\ntwo\nthree\nfour\n");
+		await a.engine.idle();
+		const b2 = await startClient(host, id, spaceId, "B", b.vault, b.store);
+		clients.push(b2);
+		await converged(a, b2);
+		expect(a.vault.files.has("notes/n.md")).toBe(false);
+		expect(a.vault.files.get("archive/n.md")).toBe("ONE\ntwo\nthree\nfour\nfive (moved and edited while closed)\n");
+		expect(a.engine.mirror!.index.live().filter((e) => e.kind === "md").length).toBe(1);
+	});
+
 	it("ignores hidden folders", async () => {
 		const { a, b } = await pair({ a: { ".obsidian/app.json": "{}", "img.png": "binary", "ok.md": "ok" } });
 		await converged(a, b);

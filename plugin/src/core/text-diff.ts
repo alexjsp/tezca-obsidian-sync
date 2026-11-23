@@ -45,3 +45,12 @@ export function threeWayMerge(base: string, local: string, current: string): Mer
 	const [text, results] = dmp.patch_apply(patches, current) as [string, boolean[]];
 	return { text, clean: results.every(Boolean) };
 }
+
+/** How much of `base` survives in `next`: 1 = all of it (whatever was added), 0 = none. */
+export function retained(base: string, next: string): number {
+	if (!base.length) return next.length ? 0 : 1;
+	const dmp = new DiffMatchPatch();
+	let kept = 0;
+	for (const [op, text] of dmp.diff_main(base, next)) if (op === 0) kept += text.length;
+	return kept / base.length;
+}
