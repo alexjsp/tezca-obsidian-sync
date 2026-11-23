@@ -44,10 +44,9 @@ const IDLE_UNLOAD_MS = 30_000;
 export class SpaceSync implements SpaceContext {
 	readonly spaceId: string;
 	private keys = new Map<number, Uint8Array>();
-	private info: SpaceInfo;
+	private _info: SpaceInfo;
 	private slots = new Map<string, DocSlot>();
 	private refOwners = new Map<number, DocSync>();
-	private nextRef = 1;
 	/** Local last-integrated seq for every doc we have stored (loaded or not). */
 	private localSeqs = new Map<string, bigint>();
 	/** Latest seq per doc as reported by the server. */
@@ -75,15 +74,20 @@ export class SpaceSync implements SpaceContext {
 		info: SpaceInfo,
 	) {
 		this.spaceId = info.spaceId;
-		this.info = info;
+		this._info = info;
 		this.applyInfo(info);
 	}
 
+	/** The latest SpaceInfo (role, epoch, members, wrapped keys). */
+	get info(): SpaceInfo {
+		return this._info;
+	}
+
 	get meta(): SpaceMeta | null {
-		if (!this.info.meta.length) return null;
+		if (!this._info.meta.length) return null;
 		try {
 			return JSON.parse(
-				fromUtf8(aeadOpen(this.keyFor(this.info.metaEpoch), this.info.meta, ad.meta(this.spaceId, this.info.metaEpoch))),
+				fromUtf8(aeadOpen(this.keyFor(this._info.metaEpoch), this._info.meta, ad.meta(this.spaceId, this._info.metaEpoch))),
 			) as SpaceMeta;
 		} catch {
 			return null;
@@ -91,11 +95,11 @@ export class SpaceSync implements SpaceContext {
 	}
 
 	get role(): SpaceRole {
-		return this.info.role;
+		return this._info.role;
 	}
 
 	applyInfo(info: SpaceInfo): void {
-		this.info = info;
+		this._info = info;
 		for (const k of info.keys) {
 			if (this.keys.has(k.epoch)) continue;
 			try {
@@ -114,20 +118,21 @@ export class SpaceSync implements SpaceContext {
 		return k;
 	}
 	currentEpoch(): number {
-		return this.info.epoch;
+		return this._info.epoch;
 	}
 	canWrite(): boolean {
-		return this.info.role === SpaceRole.OWNER || this.info.role === SpaceRole.EDITOR;
+		return this._info.role === SpaceRole.OWNER || this._info.role === SpaceRole.EDITOR;
 	}
 	isWriter(pk: Uint8Array): boolean {
-		if (!this.info.members.length) return bytesEqual(pk, this.identity.signPk);
-		return this.info.members.some(
+		if (!this._info.members.length) return bytesEqual(pk, this.identity.signPk);
+		return this._info.members.some(
 			(m) => bytesEqual(m.signPk, pk) && (m.role === SpaceRole.OWNER || m.role === SpaceRole.EDITOR),
 		);
 	}
 	allocRef(doc: DocSync): number {
-		const ref = this.nextRef++;
-		if (this.nextRef > 0x7fffffff) this.nextRef = 1;
+		// One counter per connection (shared with request ids), so errors, which carry only the
+		// number, can't be claimed by another space or request on the same connection.
+		const ref = this.conn.allocRid();
 		this.refOwners.set(ref, doc);
 		return ref;
 	}

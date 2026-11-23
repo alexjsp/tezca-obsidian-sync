@@ -4,6 +4,7 @@ import { EditorView, ViewPlugin, type PluginValue, type ViewUpdate } from "@code
 import { editorInfoField } from "obsidian";
 import { yCollab, ySyncAnnotation } from "y-codemirror.next";
 import type { DocSync } from "../core/doc-sync";
+import type { SpaceSync } from "../core/space";
 import { textOf } from "../core/mirror";
 import type { SyncEngine } from "../core/engine";
 import { log, sleep } from "../core/util";
@@ -29,6 +30,8 @@ interface Binding {
 	path: string;
 	docId: string;
 	doc: DocSync | null;
+	/** The space the doc belongs to (root or a share). */
+	space: SpaceSync | null;
 	generation: number;
 }
 
@@ -99,11 +102,12 @@ export class EditorBindings {
 		if (cur && cur.path === path) return;
 		if (cur) this.unbind(view, true);
 		const engine = this.getEngine();
-		const mirror = engine?.mirror;
-		const space = engine?.space;
+		const target = path ? engine?.spaceFor(path) : null;
+		const mirror = target?.mirror;
+		const space = target?.space;
 		if (!path || !engine || !mirror || !space || !mirror.isReady) return;
 		const gen = ++this.generation;
-		const placeholder: Binding = { view, path, docId: "", doc: null, generation: gen };
+		const placeholder: Binding = { view, path, docId: "", doc: null, space: null, generation: gen };
 		this.bindings.set(view, placeholder);
 		try {
 			const docId = await mirror.ensureEntry(path);
@@ -148,9 +152,11 @@ export class EditorBindings {
 			const awareness = doc.getAwareness();
 			const user = this.getUser();
 			awareness.setLocalStateField("user", { name: user.name, color: user.color, colorLight: user.color + "33" });
-			view.dispatch({ effects: collabCompartment.reconfigure(yCollab(ytext, awareness, { undoManager: false })) });
+			const readOnly = space.canWrite() ? [] : [EditorState.readOnly.of(true), EditorView.editable.of(false)];
+			view.dispatch({ effects: collabCompartment.reconfigure([yCollab(ytext, awareness, { undoManager: false }), readOnly]) });
 			placeholder.docId = docId;
 			placeholder.doc = doc;
+			placeholder.space = space;
 			log.debug(`bound editor to ${path}`);
 		} catch (e) {
 			log.warn(`could not bind editor for ${path}`, e);
@@ -174,12 +180,11 @@ export class EditorBindings {
 				/* view destroyed */
 			}
 		}
-		const engine = this.getEngine();
-		if (b.doc && engine?.space) {
+		if (b.doc && b.space) {
 			const stillUsed = [...this.bindings.values()].some((o) => o.docId === b.docId && o.doc);
 			if (!stillUsed) b.doc.releaseAwareness();
-			engine.space.release(b.docId);
-			engine.mirror?.afterUnbind(b.path);
+			b.space.release(b.docId);
+			this.getEngine()?.spaceFor(b.path)?.mirror.afterUnbind(b.path);
 		}
 	}
 

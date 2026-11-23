@@ -101,6 +101,11 @@ export class HostApi {
 		return res.json as T;
 	}
 
+	/** A signed JSON request (any method). */
+	signed<T = unknown>(method: string, path: string, identity: Identity, body?: unknown): Promise<T> {
+		return this.call<T>(method, path, body, identity);
+	}
+
 	info(): Promise<ServerInfo> {
 		return this.call("GET", "/api/info");
 	}
@@ -136,12 +141,93 @@ export class HostApi {
 	}
 }
 
+export type ShareRole = "owner" | "editor" | "viewer";
+
+export interface ShareInviteInfo {
+	token: string;
+	role: ShareRole;
+	created_at: number;
+	expires_at: number;
+	redeemed_by?: string;
+	redeemed_at?: number;
+}
+
+export interface RedeemedShare {
+	space_id: string;
+	role: ShareRole;
+	keys: { epoch: number; wrapped: string }[];
+	kind: number;
+	epoch: number;
+	meta: string;
+	meta_epoch: number;
+}
+
+/** Share and membership management (protocol.md "Shares (M3)"). */
+export class ShareApi {
+	constructor(
+		private readonly api: HostApi,
+		private readonly identity: Identity,
+	) {}
+
+	private sp(spaceId: string) {
+		return `/api/spaces/${encodeURIComponent(spaceId)}`;
+	}
+
+	/** Deep link for a share invite (the secret only ever travels in the link). */
+	link(token: string, secret: Uint8Array): string {
+		return `obsidian://tezca?do=share&host=${encodeURIComponent(this.api.host)}&token=${encodeURIComponent(token)}&k=${b64u(secret)}`;
+	}
+
+	createInvite(spaceId: string, role: "editor" | "viewer", keys: { epoch: number; wrapped: Uint8Array }[], ttlSeconds?: number) {
+		return this.api.signed<{ token: string; expires_at: number }>("POST", `${this.sp(spaceId)}/invites`, this.identity, {
+			role,
+			keys: keys.map((k) => ({ epoch: k.epoch, wrapped: b64u(k.wrapped) })),
+			...(ttlSeconds ? { ttl_seconds: ttlSeconds } : {}),
+		});
+	}
+
+	async listInvites(spaceId: string): Promise<ShareInviteInfo[]> {
+		return (await this.api.signed<{ invites: ShareInviteInfo[] }>("GET", `${this.sp(spaceId)}/invites`, this.identity)).invites ?? [];
+	}
+
+	revokeInvite(spaceId: string, token: string) {
+		return this.api.signed("DELETE", `${this.sp(spaceId)}/invites/${encodeURIComponent(token)}`, this.identity);
+	}
+
+	redeem(token: string): Promise<RedeemedShare> {
+		return this.api.signed("POST", "/api/share-invites/redeem", this.identity, { token });
+	}
+
+	putKeys(spaceId: string, keys: { epoch: number; wrapped: Uint8Array }[]) {
+		return this.api.signed("PUT", `${this.sp(spaceId)}/keys`, this.identity, { keys: keys.map((k) => ({ epoch: k.epoch, wrapped: b64u(k.wrapped) })) });
+	}
+
+	setRole(spaceId: string, signPk: Uint8Array, role: ShareRole) {
+		return this.api.signed("PUT", `${this.sp(spaceId)}/members/${b64u(signPk)}`, this.identity, { role });
+	}
+
+	removeMember(spaceId: string, signPk: Uint8Array) {
+		return this.api.signed("DELETE", `${this.sp(spaceId)}/members/${b64u(signPk)}`, this.identity);
+	}
+
+	rotate(spaceId: string, epoch: number, keys: { signPk: Uint8Array; wrapped: Uint8Array }[]) {
+		return this.api.signed<{ epoch: number }>("POST", `${this.sp(spaceId)}/rotate`, this.identity, {
+			epoch,
+			keys: keys.map((k) => ({ sign_pk: b64u(k.signPk), wrapped: b64u(k.wrapped) })),
+		});
+	}
+}
+
 export async function listSpaces(conn: HostConnection): Promise<SpaceInfo[]> {
 	const res = await conn.request((rid) => ({ case: "listSpaces", value: { rid } }), "spaceList");
 	return res.spaces;
 }
 
 export async function createRootSpace(conn: HostConnection, identity: Identity, name: string): Promise<SpaceInfo> {
+	return createSpace(conn, identity, name, SpaceKind.ROOT);
+}
+
+export async function createSpace(conn: HostConnection, identity: Identity, name: string, kind: SpaceKind): Promise<SpaceInfo> {
 	const spaceId = randomId();
 	const key = newSpaceKey();
 	const meta: SpaceMeta = { name, created: Date.now() };
@@ -151,7 +237,7 @@ export async function createRootSpace(conn: HostConnection, identity: Identity, 
 			value: {
 				rid,
 				spaceId,
-				kind: SpaceKind.ROOT,
+				kind,
 				wrappedKey: wrapKey(key, identity.boxPk),
 				meta: encryptMeta(spaceId, key, 0, meta),
 			},
@@ -185,7 +271,7 @@ export function waitOnline(conn: HostConnection, timeoutMs = 20_000): Promise<vo
 }
 
 export function parseDeepLink(params: Record<string, string>): {
-	action: "claim" | "join" | "pair";
+	action: "claim" | "join" | "pair" | "share";
 	host: string;
 	code?: string;
 	token?: string;
@@ -193,7 +279,7 @@ export function parseDeepLink(params: Record<string, string>): {
 	k?: string;
 } | null {
 	const action = params["do"];
-	if (action !== "claim" && action !== "join" && action !== "pair") return null;
+	if (action !== "claim" && action !== "join" && action !== "pair" && action !== "share") return null;
 	if (!params.host) return null;
 	return { action, host: normalizeHost(params.host), code: params.code, token: params.token, id: params.id, k: params.k };
 }

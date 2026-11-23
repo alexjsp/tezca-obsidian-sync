@@ -205,6 +205,7 @@ export const ad = {
 	meta: (space: string, epoch: number) => sigInput("ad-meta", space, u32(epoch)),
 	pairing: () => sigInput("ad-pairing"),
 	blob: (space: string, blobId: string, epoch: number) => sigInput("ad-blob", space, blobId, u32(epoch)),
+	invite: (space: string, epoch: number) => sigInput("ad-invite", space, u32(epoch)),
 };
 
 export const sigMsg = {
@@ -257,4 +258,19 @@ export function openBlob(spaceKey: Uint8Array, spaceId: string, id: string, epoc
 	const plain = open(spaceKey, payload, ad.blob(spaceId, id, epoch));
 	if (blobId(spaceKey, plain) !== id) throw new Error(`blob ${id} content does not match its id`);
 	return plain;
+}
+
+// ───────────── share invites ─────────────
+
+function inviteKey(secret: Uint8Array): Uint8Array {
+	return blake2b256(secret, "tezca/v1/share-invite");
+}
+
+/** Wrap a space key for a share-invite link secret (protocol.md "Share invites"). */
+export function wrapForInvite(secret: Uint8Array, spaceId: string, epoch: number, spaceKey: Uint8Array): Uint8Array {
+	return seal(inviteKey(secret), spaceKey, ad.invite(spaceId, epoch));
+}
+
+export function unwrapInvite(secret: Uint8Array, spaceId: string, epoch: number, wrapped: Uint8Array): Uint8Array {
+	return open(inviteKey(secret), wrapped, ad.invite(spaceId, epoch));
 }

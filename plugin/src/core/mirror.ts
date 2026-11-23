@@ -42,6 +42,8 @@ export interface MirrorOptions {
 	maxBlobBytes?: () => number;
 	/** Delay before retrying a failed blob transfer. */
 	retryMs?: number;
+	/** Vault folders this mirror must leave alone (the root space skips share mounts). */
+	excluded?: () => string[];
 }
 
 /** Default blob size cap when the host doesn't say. */
@@ -137,6 +139,7 @@ export class DiskMirror {
 		if (rel === null || rel === "") return false;
 		if (rel.split("/").some((seg) => seg.startsWith("."))) return false;
 		if (this.localOnly.has(vaultPath)) return false;
+		if (this.opts.excluded?.().some((m) => vaultPath === m || vaultPath.startsWith(m + "/"))) return false;
 		if (kind === "file") return fileKind(rel) === "md" || this.opts.blobs !== undefined;
 		return true;
 	}
@@ -178,6 +181,19 @@ export class DiskMirror {
 
 	get isReady(): boolean {
 		return this.ready;
+	}
+
+	/**
+	 * Stop reacting to vault events right now (synchronously). Used when this mirror's mount is
+	 * about to move or disappear: the events that follow must not be read as edits or deletes.
+	 */
+	suspend(): void {
+		this.stopped = true;
+	}
+
+	/** Can this device change the space (owner/editor)? Viewers' local changes are reverted. */
+	private get readOnly(): boolean {
+		return !this.space.canWrite();
 	}
 
 	async stop(): Promise<void> {
@@ -408,6 +424,7 @@ export class DiskMirror {
 		for (const e of [...byPath.values()].sort((a, b) => moved(a) - moved(b))) {
 			const k = canonicalPath(e.path);
 			const vp = this.toVault(e.path);
+			if (!this.inScope(vp, e.kind === "folder" ? "folder" : "file")) continue; // inside a share mount
 			if (e.kind === "folder") {
 				if (!diskFolders.has(k)) plan.push(() => this.vault.mkdir(vp));
 				diskFolders.delete(k);
@@ -495,6 +512,7 @@ export class DiskMirror {
 	}
 
 	private reconcileEntry(e: Entry, vp: string, base: Baseline | undefined): Promise<void> {
+		if (this.readOnly) return this.verifyFile(e.id); // restores the synced version, never imports
 		return e.kind === "blob" ? this.reconcileBlob(e, vp, base) : this.reconcileFile(e, vp, base);
 	}
 
@@ -605,6 +623,23 @@ export class DiskMirror {
 
 	// ───────────── local vault events ─────────────
 
+	/**
+	 * A local change in a view-only share: restore the synced entry at this path (verify keeps a
+	 * conflict copy of edits); a file that isn't synced here stays local and is never uploaded.
+	 */
+	private async onReadOnlyChange(vp: string): Promise<void> {
+		const rel = this.toRel(vp);
+		if (rel === null) return;
+		const e = this.entryByPath(rel) ?? this.tombstonedAt(rel);
+		const k = canonicalPath(rel);
+		for (const [id, b] of Object.entries(this.state.baselines)) if (canonicalPath(b.path) === k || canonicalPath(b.path).startsWith(k + "/")) this.touch(id);
+		if (e) return this.touch(e.id);
+		if ((await this.vault.size(vp)) !== null && !this.localOnly.has(vp)) {
+			this.addLocalOnly(vp);
+			this.notices.emit({ kind: "preserved", message: `"${vp}" is in a shared folder that is view-only for you, so it stays on this device only.`, paths: [vp] });
+		}
+	}
+
 	private onVaultEvent(ev: VaultEvent) {
 		if (!this.ready || this.stopped) return;
 		const relevant =
@@ -625,17 +660,26 @@ export class DiskMirror {
 				return this.onLocalWrite(ev.path);
 			case "delete":
 				if (this.expectedDeletes.delete(ev.path)) return;
+				// The whole mount folder went away: that unmounts the share here, it doesn't delete
+				// the share's files for everyone.
+				if (this.opts.mount && !(await this.vault.exists(this.opts.mount))) return;
+				if (this.readOnly) return this.onReadOnlyChange(ev.path);
 				return this.onLocalDelete(ev.path, ev.kind);
 			case "rename":
 				if (this.expectedRenames.get(ev.path) === ev.oldPath) {
 					this.expectedRenames.delete(ev.path);
 					return;
 				}
+				if (this.readOnly) {
+					await this.onReadOnlyChange(ev.oldPath);
+					return this.onReadOnlyChange(ev.path);
+				}
 				return this.onLocalRename(ev.oldPath, ev.path, ev.kind);
 		}
 	}
 
 	private async onLocalWrite(vp: string): Promise<void> {
+		if (this.readOnly) return this.onReadOnlyChange(vp);
 		if (fileKind(vp) === "blob") return this.onLocalBlobWrite(vp);
 		const D = await this.vault.read(vp);
 		const rel = this.toRel(vp)!;
@@ -722,6 +766,7 @@ export class DiskMirror {
 	}
 
 	private async importNewFile(vp: string): Promise<void> {
+		if (this.readOnly) return this.onReadOnlyChange(vp);
 		// A file we materialized whose entry was deleted elsewhere is not new: decide delete vs
 		// revive (local edits win) instead of creating a duplicate entry.
 		const tomb = this.entryByPath(this.toRel(vp)!) ? undefined : this.tombstonedAt(this.toRel(vp)!);
@@ -785,6 +830,7 @@ export class DiskMirror {
 	}
 
 	private async importNewFolder(vp: string): Promise<void> {
+		if (this.readOnly) return;
 		const rel = this.toRel(vp)!;
 		if (!(await this.vault.exists(vp))) return;
 		await this.ensureFolderEntries(rel + "/x");
@@ -891,14 +937,16 @@ export class DiskMirror {
 		const { renames } = this.index.resolvePaths();
 		for (const r of renames) this.index.setPath(r.id, r.path, LOCAL_ORIGIN);
 		const { byPath } = this.index.resolvePaths();
-		const folders = [...byPath.values()].filter((e) => e.kind === "folder").sort((a, b) => a.path.length - b.path.length);
+		const folders = [...byPath.values()]
+			.filter((e) => e.kind === "folder" && this.inScope(this.toVault(e.path), "folder"))
+			.sort((a, b) => a.path.length - b.path.length);
 		for (const f of folders) {
 			const vp = this.toVault(f.path);
 			if (!(await this.vault.exists(vp))) await this.vault.mkdir(vp);
 		}
 		for (const r of renames) this.touch(r.id);
 		for (const e of byPath.values()) {
-			if (e.kind === "folder") continue;
+			if (e.kind === "folder" || !this.inScope(this.toVault(e.path), "file")) continue;
 			const base = this.state.baselines[e.id];
 			if (e.kind === "blob") {
 				if (!base || base.path !== e.path || (e.blob && e.blob.hash !== base.hash)) this.touch(e.id);
@@ -910,6 +958,11 @@ export class DiskMirror {
 		for (const e of this.index.all()) {
 			if (!e.deleted || !this.state.baselines[e.id]) continue;
 			const vp = this.toVault(this.state.baselines[e.id].path);
+			if (!this.inScope(vp, e.kind === "folder" ? "folder" : "file")) {
+				// Now inside a share mount (folder converted elsewhere): the share owns the file.
+				this.dropBaseline(e.id);
+				continue;
+			}
 			await this.handleRemoteDelete(e, vp);
 		}
 		// Remove folders tombstoned remotely, deepest first, only if empty.
@@ -1051,6 +1104,13 @@ export class DiskMirror {
 				await this.setBaseline(id, e.path, C);
 				return;
 			}
+			if (this.readOnly) {
+				// View-only: the synced version wins; keep a local edit as a conflict copy.
+				if (fingerprint(D) !== base?.hash) await this.writeConflictCopy(vp, D, "This shared folder is view-only for you");
+				await this.selfWrite(vp, C, D);
+				await this.setBaseline(id, e.path, C);
+				return;
+			}
 			if (!base) {
 				await this.writeConflictCopy(vp, D, "A different local file existed at this path");
 				await this.selfWrite(vp, C, D);
@@ -1081,6 +1141,7 @@ export class DiskMirror {
 	 */
 	private async locate(e: Entry): Promise<Baseline | undefined | false> {
 		const id = e.id;
+		if (!this.inScope(this.toVault(e.path), "file")) return false;
 		const { byPath } = this.index.resolvePaths();
 		if (byPath.get(canonicalPath(e.path))?.id !== id) return false;
 		const vp = this.toVault(e.path);
@@ -1136,7 +1197,7 @@ export class DiskMirror {
 		const dh = D ? bytesFingerprint(D) : null;
 		if (!C) {
 			// First upload still pending: ours (we have the baseline) or another device's.
-			if (D && base) await this.commitLocalBlob(e, D, dh!);
+			if (D && base && !this.readOnly) await this.commitLocalBlob(e, D, dh!);
 			return;
 		}
 		if (dh === C.hash) {
@@ -1146,6 +1207,12 @@ export class DiskMirror {
 		}
 		if (D === null) {
 			await this.writeRemoteBlob(e, C, null);
+			return;
+		}
+		if (this.readOnly) {
+			if (!this.downloaded.has(C.id)) return this.startDownload(e.id, C);
+			if (dh !== base?.hash) await this.writeConflictCopyBinary(vp, D, "This shared folder is view-only for you");
+			await this.writeRemoteBlob(e, C, dh);
 			return;
 		}
 		if (!base) {
@@ -1256,6 +1323,37 @@ export class DiskMirror {
 		const ids = [...this.retryIds];
 		this.retryIds.clear();
 		for (const id of ids) this.touch(id);
+	}
+
+	/**
+	 * Hand a folder over to a share (folder → share conversion): in one index transaction, run
+	 * `inTxn` (which adds the mount) and tombstone every entry under the folder, dropping their
+	 * baselines but leaving the files on disk for the share's mirror to import.
+	 */
+	handOver(folder: string, inTxn: () => void): Promise<void> {
+		return this.enqueue(async () => {
+			const rel = this.toRel(folder);
+			if (rel === null) return;
+			const k = canonicalPath(rel);
+			this.index.ydoc.transact(() => {
+				inTxn();
+				for (const e of this.index.live()) {
+					const ek = canonicalPath(e.path);
+					if (ek === k || ek.startsWith(k + "/")) {
+						this.index.tombstone(e.id, LOCAL_ORIGIN);
+						this.dropBaseline(e.id);
+					}
+				}
+			}, LOCAL_ORIGIN);
+			await this.saveState();
+		});
+	}
+
+	/** Import whatever is on disk under a folder (e.g. after a share there was unmounted). */
+	rescan(folder: string): Promise<void> {
+		return this.enqueue(async () => {
+			if (await this.vault.exists(folder)) await this.importFolderTree(folder);
+		});
 	}
 
 	/** Revive a deleted entry at its last path and write it back to disk. */
