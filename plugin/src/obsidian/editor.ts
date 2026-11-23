@@ -188,6 +188,20 @@ export class EditorBindings {
 		}
 	}
 
+	/** Other people/devices in this view's note (from encrypted awareness). */
+	presence(view: EditorView): { name: string; color: string }[] {
+		const b = this.bindings.get(view);
+		if (!b?.doc) return [];
+		const aw = b.doc.getAwareness();
+		const out: { name: string; color: string }[] = [];
+		aw.getStates().forEach((state, clientId) => {
+			if (clientId === aw.clientID) return;
+			const u = (state as { user?: { name?: string; color?: string } }).user;
+			if (u?.name) out.push({ name: u.name, color: u.color ?? "var(--text-muted)" });
+		});
+		return out;
+	}
+
 	unbindAll(): void {
 		for (const view of [...this.bindings.keys()]) this.unbind(view, true);
 	}

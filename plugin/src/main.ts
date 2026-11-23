@@ -1,4 +1,4 @@
-import { Notice, Platform, Plugin, addIcon, requestUrl, MarkdownView, TFile, type ObsidianProtocolData } from "obsidian";
+import { Notice, Platform, Plugin, addIcon, requestUrl, MarkdownView, TFile, TFolder, type ObsidianProtocolData } from "obsidian";
 import type { EditorView } from "@codemirror/view";
 import { HostConnection } from "./core/connection";
 import {
@@ -20,6 +20,7 @@ import { IdbStore } from "./core/store";
 import { log } from "./core/util";
 import { SpaceKind } from "./proto/tezca/v1/sync_pb";
 import { DeletedFilesModal, HistoryModal } from "./obsidian/history-modal";
+import { ShareModal } from "./obsidian/share-modal";
 import { EditorBindings } from "./obsidian/editor";
 import { LinkModal, RecoveryPhraseModal, choose, confirm, form } from "./obsidian/modals";
 import { TezcaSettingTab } from "./obsidian/settings";
@@ -65,6 +66,7 @@ export default class TezcaPlugin extends Plugin {
 	identity: Identity | null = null;
 	editors!: EditorBindings;
 	private statusEl: HTMLElement | null = null;
+	private presenceEl: HTMLElement | null = null;
 	private lastStatus: EngineStatus | null = null;
 	private keystore: IdbStore | null = null;
 	private vaultStore: IdbStore | null = null;
@@ -92,6 +94,9 @@ export default class TezcaPlugin extends Plugin {
 		this.statusEl = this.addStatusBarItem();
 		this.statusEl.addClass("tezca-status");
 		this.renderStatus();
+		this.presenceEl = this.addStatusBarItem();
+		this.presenceEl.addClass("tezca-presence");
+		this.registerInterval(window.setInterval(() => this.renderPresence(), 2000));
 
 		this.settingTab = new TezcaSettingTab(this.app, this);
 		this.addSettingTab(this.settingTab);
@@ -106,7 +111,7 @@ export default class TezcaPlugin extends Plugin {
 			name: "Show version history of the current file",
 			checkCallback: (checking) => {
 				const file = this.app.workspace.getActiveFile();
-				const mirror = this.engine?.mirror;
+				const mirror = file ? this.engine?.spaceFor(file.path)?.mirror : undefined;
 				if (!file || !mirror?.isReady) return false;
 				if (!checking) new HistoryModal(this.app, mirror, file).open();
 				return true;
@@ -116,22 +121,57 @@ export default class TezcaPlugin extends Plugin {
 			id: "recently-deleted",
 			name: "Show recently deleted files",
 			checkCallback: (checking) => {
-				const mirror = this.engine?.mirror;
+				// The shared folder the active file is in, or the private vault.
+				const file = this.app.workspace.getActiveFile();
+				const mirror = (file ? this.engine?.spaceFor(file.path) : this.engine?.root)?.mirror;
 				if (!mirror?.isReady) return false;
 				if (!checking) new DeletedFilesModal(this.app, mirror).open();
 				return true;
 			},
 		});
+		this.addCommand({
+			id: "manage-share",
+			name: "Manage the shared folder of the current file",
+			checkCallback: (checking) => {
+				const file = this.app.workspace.getActiveFile();
+				const sh = file ? this.engine?.spaceFor(file.path) : null;
+				if (!sh || sh === this.engine?.root) return false;
+				if (!checking) new ShareModal(this.app, this.engine!, sh.spaceId).open();
+				return true;
+			},
+		});
 		this.registerEvent(
 			this.app.workspace.on("file-menu", (menu, file) => {
-				const mirror = this.engine?.mirror;
-				if (!(file instanceof TFile) || !mirror?.isReady) return;
-				menu.addItem((item) =>
-					item
-						.setTitle("Version history")
-						.setIcon("history")
-						.onClick(() => new HistoryModal(this.app, mirror, file).open()),
-				);
+				const engine = this.engine;
+				if (!engine?.mirror?.isReady) return;
+				if (file instanceof TFile) {
+					const mirror = engine.spaceFor(file.path)?.mirror;
+					if (!mirror) return;
+					menu.addItem((item) =>
+						item
+							.setTitle("Version history")
+							.setIcon("history")
+							.onClick(() => new HistoryModal(this.app, mirror, file).open()),
+					);
+					return;
+				}
+				if (!(file instanceof TFolder) || file.isRoot()) return;
+				const mount = engine.mounts?.all().find((m) => m.path === file.path);
+				if (mount) {
+					menu.addItem((item) =>
+						item
+							.setTitle("Manage shared folder…")
+							.setIcon("users")
+							.onClick(() => new ShareModal(this.app, engine, mount.spaceId).open()),
+					);
+				} else if (!engine.mounts?.containing(file.path) && !engine.mounts?.all().some((m) => m.path.startsWith(file.path + "/"))) {
+					menu.addItem((item) =>
+						item
+							.setTitle("Share folder…")
+							.setIcon("users")
+							.onClick(() => void this.shareFolder(file.path)),
+					);
+				}
 			}),
 		);
 
@@ -213,6 +253,7 @@ export default class TezcaPlugin extends Plugin {
 			clientVersion: this.manifest.version,
 			isBound: (p) => this.editors.isBound(p),
 			http: obsidianHttp,
+			profile: () => ({ name: this.settings.displayName || this.settings.deviceName, color: this.settings.color }),
 		});
 		this.engine = engine;
 		engine.status.on((s) => {
@@ -280,6 +321,69 @@ export default class TezcaPlugin extends Plugin {
 		el.setAttr("aria-label", text);
 	}
 
+	/** Who else has the active note open (from encrypted awareness). */
+	private renderPresence() {
+		const el = this.presenceEl;
+		if (!el) return;
+		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+		// @ts-expect-error: `cm` is the CodeMirror 6 EditorView (undocumented but stable)
+		const cm = view?.editor?.cm as EditorView | undefined;
+		const people = cm ? this.editors.presence(cm) : [];
+		el.empty();
+		el.toggle(people.length > 0);
+		if (!people.length) return;
+		el.setAttr("aria-label", `Also here: ${people.map((p) => p.name).join(", ")}`);
+		for (const p of people.slice(0, 5)) {
+			const dot = el.createSpan({ cls: "tezca-avatar", text: (p.name.trim()[0] ?? "?").toUpperCase() });
+			dot.style.backgroundColor = p.color;
+			dot.setAttr("title", p.name);
+		}
+		if (people.length > 5) el.createSpan({ text: ` +${people.length - 5}` });
+	}
+
+	// ───────────── sharing ─────────────
+
+	async shareFolder(path: string) {
+		const engine = this.engine;
+		if (!engine) return;
+		const name = path.split("/").pop() ?? path;
+		const ok = await confirm(
+			this.app,
+			`Share "${name}"?`,
+			"This turns the folder into a shared folder that you can invite people to. Its files keep syncing to all your devices. Version history from before sharing stays with your private vault.",
+			"Share folder",
+		);
+		if (!ok) return;
+		try {
+			const spaceId = await engine.shareFolder(path, name);
+			new Notice(`"${name}" is now a shared folder`);
+			const open = () => {
+				if (engine.shares.has(spaceId)) new ShareModal(this.app, engine, spaceId).open();
+				else window.setTimeout(open, 300);
+			};
+			open();
+		} catch (e) {
+			new Notice(`Tezca: couldn't share the folder: ${(e as Error).message}`, 10000);
+		}
+	}
+
+	async joinShare(host: string, token: string, secret: string) {
+		const engine = this.engine;
+		if (!engine) throw new Error("Set up Tezca on this vault before joining a shared folder.");
+		if (normalizeHost(host) !== normalizeHost(this.settings.host))
+			throw new Error("This invite is for a different host. Shared folders across hosts are coming in a later version.");
+		const path = await engine.joinShare(token, secret, async (shareName) => {
+			let suggestion = shareName;
+			for (let i = 2; this.app.vault.getAbstractFileByPath(suggestion); i++) suggestion = `${shareName} ${i}`;
+			const v = await form(this.app, `Join "${shareName}"`, "Choose the folder in your vault where this shared folder will live.", [
+				{ key: "path", name: "Folder", value: suggestion },
+			], "Join");
+			const p = v?.path.trim().replace(/^\/+|\/+$/g, "");
+			return p ? p : null;
+		});
+		if (path) new Notice(`Joined. The shared folder is at "${path}".`);
+	}
+
 	// ───────────── setup flows ─────────────
 
 	private api(host: string) {
@@ -292,6 +396,7 @@ export default class TezcaPlugin extends Plugin {
 		try {
 			if (link.action === "claim") await this.claimHost(link.host, link.code ?? "");
 			else if (link.action === "join") await this.joinHost(link.host, link.token ?? "");
+			else if (link.action === "share") await this.joinShare(link.host, link.token ?? "", link.k ?? "");
 			else await this.acceptPairing(link.host, link.id ?? "", link.k ?? "");
 		} catch (e) {
 			log.error(e);

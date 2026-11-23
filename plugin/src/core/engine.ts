@@ -252,6 +252,15 @@ export class SyncEngine {
 			const m = want.get(id);
 			if (m && m.path === sh.mount) continue;
 			await this.unmountNow(id, m === undefined);
+			// Moved on another device: move the folder here too before remounting, or the share
+			// would see its files missing at the new path (and the old folder would turn private).
+			if (m && (await this.opts.vault.exists(sh.mount)) && !(await this.opts.vault.exists(m.path))) {
+				try {
+					await this.opts.vault.rename(sh.mount, m.path);
+				} catch (e) {
+					log.warn(`could not move ${sh.mount} to ${m.path}`, e);
+				}
+			}
 		}
 		for (const m of want.values()) if (!this.shares.has(m.spaceId)) void this.mountShare(m);
 	}
@@ -281,6 +290,14 @@ export class SyncEngine {
 				if (!info) return; // refreshInfos unmounted it
 			}
 			const fresh = !(await this.opts.store.get(`mirror/${m.spaceId}`));
+			if (!fresh && !(await this.opts.vault.exists(m.path))) {
+				// The mount folder was deleted while we weren't running: that unmounts the share
+				// here (as it would live), it must not delete the share's files for everyone.
+				this.mounts?.remove(m.spaceId, LOCAL_ORIGIN);
+				await this.opts.store.delete(`mirror/${m.spaceId}`);
+				this.notices.emit({ kind: "preserved", message: `The shared folder "${m.path}" was removed from this vault. Other members still have it; open its invite again to re-add it.` });
+				return;
+			}
 			const space = new SpaceSync(this.conn, this.opts.store, this.opts.identity, info);
 			await space.start();
 			const mirror = this.newMirror(space, m.path);

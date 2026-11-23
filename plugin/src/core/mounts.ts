@@ -33,6 +33,7 @@ export class Mounts {
 	}
 
 	set(spaceId: string, path: string, origin?: unknown): void {
+		if (this.get(spaceId)?.path === path) return;
 		this.ydoc.transact(() => this.map.set(spaceId, JSON.stringify({ path })), origin);
 	}
 

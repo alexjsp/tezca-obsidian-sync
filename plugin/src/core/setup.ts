@@ -156,7 +156,7 @@ export interface RedeemedShare {
 	space_id: string;
 	role: ShareRole;
 	keys: { epoch: number; wrapped: string }[];
-	kind: number;
+	kind: string;
 	epoch: number;
 	meta: string;
 	meta_epoch: number;
