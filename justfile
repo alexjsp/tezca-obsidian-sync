@@ -31,3 +31,16 @@ deploy-unraid:
 install-plugin vault: build
   mkdir -p {{quote(vault)}}/.obsidian/plugins/tezca-sync
   cp plugin/main.js plugin/manifest.json plugin/styles.css {{quote(vault)}}/.obsidian/plugins/tezca-sync/
+
+# Publish a plugin release to GitHub (BRAT installs/updates from these). Usage: just release 0.1.1
+release version: test
+  #!/usr/bin/env bash
+  set -euo pipefail
+  [ -z "$(git status --porcelain)" ] || { echo "working tree not clean" >&2; exit 1; }
+  jq --arg v {{quote(version)}} '.version = $v' plugin/manifest.json > plugin/manifest.json.tmp && mv plugin/manifest.json.tmp plugin/manifest.json
+  jq --arg v {{quote(version)}} '.version = $v' plugin/package.json > plugin/package.json.tmp && mv plugin/package.json.tmp plugin/package.json
+  pnpm -C plugin build
+  if ! git diff --quiet; then git commit -qam "Release {{version}}"; fi
+  git push origin main
+  gh release create {{quote(version)}} --target main --title {{quote(version)}} --generate-notes \
+    plugin/main.js plugin/manifest.json plugin/styles.css
