@@ -104,6 +104,8 @@ export class DiskMirror {
 	private retryIds = new Set<string>();
 	private retryTimer: ReturnType<typeof setTimeout> | null = null;
 	private tooLarge = new Set<string>();
+	/** Entry id → hash of its local version being uploaded (not yet recorded in the index). */
+	private unsyncedBlob = new Map<string, string>();
 
 	constructor(
 		readonly space: SpaceSync,
@@ -1070,16 +1072,15 @@ export class DiskMirror {
 		// Follow a rename made elsewhere.
 		if (base && base.path !== e.path) {
 			const oldVp = this.toVault(base.path);
-			// Move the old file if it is still ours: unchanged since last sync, or edited locally but
-			// not claimed by any other entry (then the edit travels with it and syncs at the new path;
-			// leaving it behind would orphan the edit).
+			// Move the old file only if it is still ours: unchanged since last sync, or exactly this
+			// entry's own local edit that is still being uploaded (leaving that behind would orphan it).
 			const oldHash = await this.diskHash(oldVp, e.kind);
-			if (oldHash !== null && !(await this.vault.exists(vp))) {
-				const oldK = canonicalPath(base.path);
-				const claimed =
-					Object.entries(this.state.baselines).some(([o, b]) => o !== id && canonicalPath(b.path) === oldK) ||
-					this.index.live().some((o) => o.id !== id && canonicalPath(o.path) === oldK);
-				if (oldHash === base.hash || !claimed) await this.selfRename(oldVp, vp);
+			if (oldHash !== null && (oldHash === base.hash || oldHash === this.unsyncedBlob.get(id)) && !(await this.vault.exists(vp))) {
+				await this.selfRename(oldVp, vp);
+			} else if (oldHash !== null) {
+				// A local edit not yet synced stays at the old path: track it as a file of its own
+				// (once this entry has moved off that path) rather than orphaning it.
+				void this.enqueue(() => this.importNewFile(oldVp));
 			}
 			base = { ...base, path: e.path };
 			this.state.baselines[id] = base;
@@ -1171,10 +1172,14 @@ export class DiskMirror {
 	private async commitLocalBlob(e: Entry, D: Uint8Array, dh: string): Promise<void> {
 		if (D.length > this.maxBlobBytes()) return this.warnTooLarge(this.toVault(e.path), D.length);
 		const ref = this.uploaded.get(dh);
-		if (!ref) return this.startUpload(e.id, D, dh);
+		if (!ref) {
+			this.unsyncedBlob.set(e.id, dh);
+			return this.startUpload(e.id, D, dh);
+		}
 		this.index.setBlob(e.id, ref, LOCAL_ORIGIN);
 		this.setBlobBaseline(e.id, e.path, dh);
 		this.uploaded.delete(dh);
+		this.unsyncedBlob.delete(e.id);
 	}
 
 	/** Run a transfer once per key; every entry waiting on it is re-verified when it ends. */

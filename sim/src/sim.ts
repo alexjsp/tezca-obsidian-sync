@@ -5,7 +5,7 @@
 //   3. no data loss: every appended token survives unless its file was deleted
 //   4. attachments: every version written survives on disk, in a conflict copy, or in history
 //
-// Usage: pnpm sim [--seed N] [--clients N] [--steps N] [--runs N] [--verbose]
+// Usage: pnpm sim [--seed N] [--clients N] [--steps N] [--runs N] [--verbose] [--no-blobs]
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -31,6 +31,7 @@ const arg = (name: string, def: number) => {
 	return i >= 0 ? Number(args[i + 1]) : def;
 };
 const VERBOSE = args.includes("--verbose");
+const NO_BLOBS = args.includes("--no-blobs");
 log.level = VERBOSE ? "info" : "error";
 
 // ───────────── PRNG ─────────────
@@ -99,6 +100,8 @@ function wsFactory(c: SimClient): WSCtor {
 			super(url);
 			c.sockets.add(this);
 			this.on("close", () => c.sockets.delete(this));
+			// Node's ws throws on close-before-open with no error listener; browsers don't.
+			this.on("error", () => undefined);
 			if (c.offline) setImmediate(() => this.terminate());
 		}
 	} as unknown as WSCtor & (new (url: string) => WSLike);
@@ -197,8 +200,8 @@ async function run(seed: number, nClients: number, steps: number, bin: string): 
 			const r = rnd();
 			let op = "";
 			try {
-				const bins = binFiles(c);
-				if (r >= 0.12 && r < 0.17) {
+				const bins = NO_BLOBS ? [] : binFiles(c);
+				if (!NO_BLOBS && r >= 0.12 && r < 0.17) {
 					const p = `${pick(folders)}img-${Math.floor(rnd() * 15)}.bin`;
 					if (c.vault.files.has(p)) continue;
 					await c.vault.userWriteBinary(p, randomBlob(`${step} ${c.name}: create ${p}`));

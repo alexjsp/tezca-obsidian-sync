@@ -155,4 +155,37 @@ Disk-contract details found and fixed with the simulator (each is now a test or 
 - Moved entries are processed before others in both startup reconcile and the live sweep, so old paths are vacated first.
 - Baselines record the doc seq, so the startup fast path can't skip a doc whose remote changes never reached disk.
 
-Not yet verified: running inside real Obsidian (desktop + mobile), and `docker build` (the Docker daemon was unavailable).
+Since verified in real use: desktop and iPhone (via BRAT), and the Docker image on Unraid (`just deploy-unraid`).
+
+Incidents found in real use (both fixed, both now tests):
+- 0.1.0: opening a note could start two editor binds that cancelled each other forever, freezing the window.
+- 0.1.1: Obsidian points a view at a newly opened file before loading its text. Binding in that gap merged the
+  previous note's text into the new note. Binding now never uses editor text as input; it waits until the editor
+  shows the file's disk or synced text. `plugin/scripts/recover-doc.ts` rebuilds a doc from the server log.
+
+### M2: attachments and history (built 2026-11-23)
+- **Blobs:** every non-Markdown file is a `blob` index entry. Content is encrypted whole-file under a keyed content
+  address (dedup, idempotent upload). The entry records the current version and up to 20 earlier ones.
+  Server: `PUT/GET/HEAD /api/spaces/{space}/blobs/{id}` with streamed signature and size checks; filesystem or
+  S3 store; `TEZCA_MAX_BLOB_MB` (default 100).
+- **Blob conflicts:** the last recorded version wins everywhere; a local version that lost (edited concurrently,
+  or recorded concurrently and absent from the winner's history) is kept as a local-only conflict copy.
+  Transfers run outside the mirror queue (4 at a time) and retry after failures or reconnecting.
+- **History:** retained snapshots are versions (latest; hourly for 24 h; daily for 30 days). Devices take a
+  version snapshot after local edits, once the note has been quiet for 30 s and the last snapshot is over an hour
+  old. `ListVersions`/`GetVersion` on the wire; a modal with diff/restore for notes and preview/restore for
+  attachments (command and file menu); "Recently deleted" restores tombstoned files.
+- **Simulator:** attachment create/modify/rename/delete; asserts disk equals the index for attachments and that
+  no attachment version written by one device ever disappears from every disk and every history.
+
+Found by the simulator during M2: an unsynced local edit was left behind (untracked) when a remote rename
+arrived. The file now follows the rename when it is exactly this entry's upload in progress; otherwise (the
+edit raced the rename) it is imported as a file of its own. A looser first fix (move it whenever no other entry
+claims the old path) let a collision loser take over a deleted winner's file, which the simulator also caught.
+
+Not done in M2:
+- Blob garbage collection. The server keeps every blob; the host can't see which ones the encrypted index still
+  references, so GC has to be client-driven (an owner device lists live references, the server deletes the rest
+  after a grace period).
+- Large-file streaming. Blobs are encrypted whole in memory, fine at the 100 MB default cap.
+- Versions of attachments are kept only in the index (last 20), not on a time schedule.

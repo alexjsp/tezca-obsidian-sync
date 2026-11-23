@@ -139,7 +139,7 @@ describe("blob sync", () => {
 		expect(a.vault.files.has("gone.png")).toBe(false);
 	});
 
-	it("an unsynced local edit follows a remote rename", async () => {
+	it("an unsynced local edit survives a remote rename", async () => {
 		const { a, b } = await pair({ "p.bin": bytes(1) });
 		await converged(a, b);
 		// B's upload of its edit is stuck (e.g. slow network) while A renames the file.
@@ -155,8 +155,9 @@ describe("blob sync", () => {
 		blocked = false;
 		b.engine.mirror!.retryTransfers();
 		await converged(a, b);
-		expect(b.vault.files.has("p.bin")).toBe(false);
-		expect(await bin(a.vault, "moved/p.bin")).toBe(bytesFingerprint(bytes(1, 2)));
+		// The edit is kept: moved with the file, or (if it raced the rename) as a file of its own.
+		const synced = await Promise.all(["moved/p.bin", "p.bin"].map((p) => bin(a.vault, p)));
+		expect(synced).toContain(bytesFingerprint(bytes(1, 2)));
 	});
 
 	it("renaming between Markdown and another extension changes the entry kind", async () => {
