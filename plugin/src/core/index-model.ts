@@ -3,7 +3,7 @@
 import * as Y from "yjs";
 import type { BlobRef } from "./blobs";
 
-export type EntryKind = "md" | "folder" | "blob";
+export type EntryKind = "md" | "folder" | "blob" | "canvas";
 
 /** How many earlier versions a blob entry keeps. */
 export const BLOB_HISTORY = 20;
@@ -136,7 +136,7 @@ export class IndexModel {
 function toEntry(id: string, m: Y.Map<unknown>): Entry | null {
 	const path = m.get("path");
 	const kind = m.get("kind");
-	if (typeof path !== "string" || (kind !== "md" && kind !== "folder" && kind !== "blob")) return null;
+	if (typeof path !== "string" || (kind !== "md" && kind !== "folder" && kind !== "blob" && kind !== "canvas")) return null;
 	const e: Entry = {
 		id,
 		path,

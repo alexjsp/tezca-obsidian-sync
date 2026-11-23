@@ -6,6 +6,7 @@ import { bytesFingerprint, fingerprint, randomId } from "./crypto";
 import { REMOTE_ORIGIN, type DocSync } from "./doc-sync";
 import { IndexModel, canonicalPath, type Entry } from "./index-model";
 import { INDEX_DOC, type SpaceSync } from "./space";
+import { applyCanvas, canvasText, sameCanvas } from "./canvas";
 import { applyTextDiff, threeWayMerge } from "./text-diff";
 import type { VaultAdapter, VaultEvent } from "./vault";
 import { Emitter, log, Semaphore } from "./util";
@@ -53,8 +54,9 @@ const BLOB_CONCURRENCY = 4;
 const DOWNLOAD_CACHE_BYTES = 64 * 1024 * 1024;
 
 /** What kind of entry a file at this path is. */
-export function fileKind(path: string): "md" | "blob" {
-	return path.toLowerCase().endsWith(".md") ? "md" : "blob";
+export function fileKind(path: string): "md" | "canvas" | "blob" {
+	const p = path.toLowerCase();
+	return p.endsWith(".md") ? "md" : p.endsWith(".canvas") ? "canvas" : "blob";
 }
 
 export interface MirrorNotice {
@@ -66,6 +68,45 @@ export interface MirrorNotice {
 export function textOf(doc: DocSync): Y.Text {
 	return doc.ydoc.getText(TEXT_KEY);
 }
+
+/** How a doc-backed file kind maps between its disk text and its CRDT. */
+export interface ContentModel {
+	read(doc: DocSync): string;
+	/** Make the doc hold `next`; with `base` (last synced text) only base→next changes are applied. */
+	write(doc: DocSync, next: string, base: string | null): void;
+	/** Same content (canvas ignores formatting)? */
+	same(a: string, b: string): boolean;
+	/** Merge disk's changes since `base` onto the CRDT. Returns false if that wasn't possible cleanly. */
+	merge(doc: DocSync, base: string, disk: string): boolean;
+}
+
+const MARKDOWN: ContentModel = {
+	read: (doc) => textOf(doc).toString(),
+	write: (doc, next) => void applyTextDiff(textOf(doc), next, LOCAL_ORIGIN),
+	same: (a, b) => a === b,
+	merge(doc, base, disk) {
+		const { text, clean } = threeWayMerge(base, disk, textOf(doc).toString());
+		applyTextDiff(textOf(doc), text, LOCAL_ORIGIN);
+		return clean;
+	},
+};
+
+const CANVAS: ContentModel = {
+	read: (doc) => canvasText(doc.ydoc),
+	write: (doc, next, base) => applyCanvas(doc.ydoc, base, next, LOCAL_ORIGIN),
+	same: sameCanvas,
+	merge(doc, base, disk) {
+		applyCanvas(doc.ydoc, base, disk, LOCAL_ORIGIN); // per-node/field changes merge cleanly
+		return true;
+	},
+};
+
+/** The content model for a doc-backed entry kind. */
+export function contentModel(kind: string): ContentModel {
+	return kind === "canvas" ? CANVAS : MARKDOWN;
+}
+
+const isDocKind = (k: string | undefined) => k === "md" || k === "canvas";
 
 /** Quiet period before verifying touched files against the CRDT. */
 const SWEEP_DEBOUNCE_MS = 150;
@@ -142,7 +183,7 @@ export class DiskMirror {
 		if (rel.split("/").some((seg) => seg.startsWith("."))) return false;
 		if (this.localOnly.has(vaultPath)) return false;
 		if (this.opts.excluded?.().some((m) => vaultPath === m || vaultPath.startsWith(m + "/"))) return false;
-		if (kind === "file") return fileKind(rel) === "md" || this.opts.blobs !== undefined;
+		if (kind === "file") return fileKind(rel) !== "blob" || this.opts.blobs !== undefined;
 		return true;
 	}
 
@@ -256,7 +297,7 @@ export class DiskMirror {
 	}
 
 	/** Content fingerprint of a file on disk (text or bytes per its kind), or null if missing. */
-	private async diskHash(vp: string, kind: "md" | "blob" | "folder"): Promise<string | null> {
+	private async diskHash(vp: string, kind: "md" | "canvas" | "blob" | "folder"): Promise<string | null> {
 		if (kind === "blob") {
 			const b = await this.vault.readBinary(vp);
 			return b ? bytesFingerprint(b) : null;
@@ -549,8 +590,8 @@ export class DiskMirror {
 		// the CRDT isn't just "not downloaded yet" (that once overwrote a note with empty text).
 		const doc = stale || !base ? await this.space.acquireSynced(e.id) : await this.space.acquire(e.id);
 		try {
-			const ytext = textOf(doc);
-			const C = ytext.toString();
+			const model = contentModel(e.kind);
+			const C = model.read(doc);
 			const D = await this.vault.read(vp);
 			if (D === null) {
 				if (base) {
@@ -570,7 +611,7 @@ export class DiskMirror {
 				}
 				return;
 			}
-			if (D === C) {
+			if (model.same(D, C)) {
 				await this.setBaseline(e.id, e.path, D);
 				return;
 			}
@@ -586,7 +627,7 @@ export class DiskMirror {
 				return;
 			}
 			if (dh !== base.hash && ch === base.hash) {
-				applyTextDiff(ytext, D, LOCAL_ORIGIN);
+				model.write(doc, D, await this.baselineText(e.id, base));
 				await this.setBaseline(e.id, e.path, D);
 				return;
 			}
@@ -610,22 +651,23 @@ export class DiskMirror {
 	}
 
 	private async mergeDiskIntoCrdt(e: Entry, vp: string, doc: DocSync, D: string, base: Baseline): Promise<void> {
-		const ytext = textOf(doc);
-		const C = ytext.toString();
+		const model = contentModel(e.kind);
 		const B = await this.baselineText(e.id, base);
-		let merged: string;
-		let clean: boolean;
-		if (B === null) {
-			// Baseline text unavailable: cannot merge safely.
-			merged = C;
-			clean = false;
-		} else ({ text: merged, clean } = threeWayMerge(B, D, C));
+		// Baseline text unavailable: cannot merge safely (keep the CRDT, preserve disk as a copy).
+		let clean = false;
+		if (B !== null) {
+			try {
+				clean = model.merge(doc, B, D);
+			} catch (err) {
+				log.warn(`could not merge ${vp}`, err); // e.g. a canvas file that isn't valid JSON
+			}
+		}
 		if (!clean) await this.writeConflictCopy(vp, D, "Edits made outside Obsidian could not be merged automatically");
-		applyTextDiff(ytext, merged, LOCAL_ORIGIN);
+		const merged = model.read(doc);
 		// The CRDT now contains D's changes: D is the new common ancestor until disk catches up.
 		const rel = this.toRel(vp)!;
 		await this.setBaseline(e.id, rel, D);
-		if (merged !== D) await this.selfWrite(vp, merged, D);
+		if (!model.same(merged, D)) await this.selfWrite(vp, merged, D);
 		await this.setBaseline(e.id, rel, merged);
 	}
 
@@ -694,7 +736,10 @@ export class DiskMirror {
 
 	private async onLocalWrite(vp: string): Promise<void> {
 		if (this.readOnly) return this.onReadOnlyChange(vp);
-		if (fileKind(vp) === "blob") return this.onLocalBlobWrite(vp);
+		// The entry's own kind decides (a .canvas recorded as a blob before live canvases stays a blob).
+		const known = this.toRel(vp) === null ? undefined : this.entryByPath(this.toRel(vp)!);
+		const kind = known && known.kind !== "folder" ? known.kind : fileKind(vp);
+		if (kind === "blob") return this.onLocalBlobWrite(vp);
 		const D = await this.vault.read(vp);
 		const rel = this.toRel(vp)!;
 		if (D === null) {
@@ -706,26 +751,26 @@ export class DiskMirror {
 		if (this.consumeExpectedWrite(vp, D)) return;
 		const e = this.entryByPath(rel);
 		if (!e) return this.importNewFile(vp);
-		if (e.kind !== "md") return;
+		if (!isDocKind(e.kind)) return;
+		const model = contentModel(e.kind);
 		const doc = await this.space.acquire(e.id);
 		try {
-			const ytext = textOf(doc);
-			const C = ytext.toString();
-			if (D === C) {
+			const C = model.read(doc);
+			if (model.same(D, C)) {
 				await this.setBaseline(e.id, rel, D);
 				return;
 			}
 			if (this.isBound(vp)) return; // the live editor is authoritative while open
 			const base = this.state.baselines[e.id];
 			if (!base) {
-				// We never materialized this entry here: the file on disk is a different note.
-				await this.createEntryFor(rel, D);
+				// We never materialized this entry here: the file on disk is a different file.
+				await this.createEntryFor(rel, D, e.kind);
 				this.touch(e.id);
 				return;
 			}
 			if (fingerprint(C) === base.hash) {
 				// CRDT hasn't moved since disk was last in sync (or no history): disk change is the edit.
-				applyTextDiff(ytext, D, LOCAL_ORIGIN);
+				model.write(doc, D, await this.baselineText(e.id, base));
 				await this.setBaseline(e.id, rel, D);
 				return;
 			}
@@ -804,13 +849,20 @@ export class DiskMirror {
 	 * Track a local file as a brand-new entry. If the index already has a (never materialized
 	 * here) entry at the same path, they are different files: collision resolution renames one.
 	 */
-	private async createEntryFor(rel: string, D: string): Promise<void> {
+	private async createEntryFor(rel: string, D: string, kind: "md" | "canvas" | "blob" | "folder" = fileKind(rel)): Promise<void> {
+		const k = kind === "canvas" ? "canvas" : "md";
 		await this.ensureFolderEntries(rel);
 		const id = randomId();
-		this.index.create(id, rel, "md", LOCAL_ORIGIN);
 		const doc = await this.space.acquire(id);
 		try {
-			textOf(doc).insert(0, D);
+			try {
+				contentModel(k).write(doc, D, null);
+			} catch (err) {
+				// Not valid canvas JSON (e.g. a half-written file): leave it untracked until it's readable.
+				log.warn(`not importing ${rel} yet`, err);
+				return;
+			}
+			this.index.create(id, rel, k, LOCAL_ORIGIN);
 			await this.setBaseline(id, rel, D);
 		} finally {
 			this.space.release(id);
@@ -1029,7 +1081,11 @@ export class DiskMirror {
 			this.index.revive(e.id, rel, LOCAL_ORIGIN);
 			const doc = await this.space.acquire(e.id);
 			try {
-				applyTextDiff(textOf(doc), D, LOCAL_ORIGIN);
+				try {
+					contentModel(e.kind).write(doc, D, await this.baselineText(e.id, base));
+				} catch (err) {
+					log.warn(`could not import ${vp}`, err);
+				}
 				await this.setBaseline(e.id, rel, D);
 			} finally {
 				this.space.release(e.id);
@@ -1103,18 +1159,18 @@ export class DiskMirror {
 	private async verifyFile(id: string): Promise<void> {
 		const e = this.index.get(id);
 		if (e?.kind === "blob") return this.verifyBlob(id);
-		if (!e || e.deleted || e.kind !== "md") return;
+		if (!e || e.deleted || !isDocKind(e.kind)) return;
 		const vp = this.toVault(e.path);
 		if (this.isBound(vp)) return;
 		const base = await this.locate(e);
 		if (base === false) return;
 		const doc = base ? await this.space.acquire(id) : await this.space.acquireSynced(id);
 		try {
-			const ytext = textOf(doc);
-			const C = ytext.toString();
+			const model = contentModel(e.kind);
+			const C = model.read(doc);
 			const D = await this.vault.read(vp);
-			if (D === C) {
-				await this.setBaseline(id, e.path, C);
+			if (D !== null && model.same(D, C)) {
+				await this.setBaseline(id, e.path, D);
 				return;
 			}
 			if (D === null) {
@@ -1143,7 +1199,7 @@ export class DiskMirror {
 				return;
 			}
 			if (fingerprint(C) === base.hash) {
-				applyTextDiff(ytext, D, LOCAL_ORIGIN); // unimported local edit
+				model.write(doc, D, await this.baselineText(id, base)); // unimported local edit
 				await this.setBaseline(id, e.path, D);
 				return;
 			}

@@ -12,7 +12,7 @@ import {
 	restoreNoteText,
 	type NoteVersion,
 } from "../core/history";
-import { textOf, type DiskMirror } from "../core/mirror";
+import { contentModel, type DiskMirror } from "../core/mirror";
 import { log } from "../core/util";
 
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|bmp|avif)$/i;
@@ -96,9 +96,10 @@ export class HistoryModal extends Modal {
 	private async showNoteVersion(docId: string, v: NoteVersion) {
 		this.viewEl.setText("Loading…");
 		try {
-			const old = await noteVersionText(this.mirror.space, docId, v.baseSeq);
+			const kind = this.entry()?.kind ?? "md";
+			const old = await noteVersionText(this.mirror.space, docId, v.baseSeq, kind);
 			const doc = await this.mirror.space.acquire(docId);
-			const current = textOf(doc).toString();
+			const current = contentModel(kind).read(doc);
 			this.mirror.space.release(docId);
 			this.viewEl.empty();
 			new Setting(this.viewEl)
@@ -114,7 +115,7 @@ export class HistoryModal extends Modal {
 						.setCta()
 						.setDisabled(old === current)
 						.onClick(async () => {
-							await restoreNoteText(this.mirror, docId, old);
+							await restoreNoteText(this.mirror, docId, old, kind);
 							new Notice(`Restored ${this.file.name}`);
 							this.close();
 						}),

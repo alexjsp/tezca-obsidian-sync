@@ -3,9 +3,9 @@ import * as Y from "yjs";
 import type { BlobRef } from "./blobs";
 import { ad, open } from "./crypto";
 import type { Entry } from "./index-model";
-import { LOCAL_ORIGIN, TEXT_KEY, textOf, type DiskMirror } from "./mirror";
+import { canvasText } from "./canvas";
+import { LOCAL_ORIGIN, TEXT_KEY, contentModel, type DiskMirror } from "./mirror";
 import type { SpaceSync } from "./space";
-import { applyTextDiff } from "./text-diff";
 
 export interface NoteVersion {
 	baseSeq: bigint;
@@ -24,8 +24,8 @@ export async function listNoteVersions(space: SpaceSync, docId: string): Promise
 	return res.versions.map((v) => ({ baseSeq: v.baseSeq, createdAt: Number(v.createdAt), size: Number(v.size), epoch: v.epoch }));
 }
 
-/** The text of a note at a retained version. */
-export async function noteVersionText(space: SpaceSync, docId: string, baseSeq: bigint): Promise<string> {
+/** The text of a note (or canvas) at a retained version. */
+export async function noteVersionText(space: SpaceSync, docId: string, baseSeq: bigint, kind = "md"): Promise<string> {
 	const res = await space.conn.request(
 		(rid) => ({ case: "getVersion", value: { rid, spaceId: space.spaceId, docId, baseSeq } }),
 		"versionData",
@@ -35,17 +35,17 @@ export async function noteVersionText(space: SpaceSync, docId: string, baseSeq: 
 	const doc = new Y.Doc();
 	try {
 		Y.applyUpdate(doc, state);
-		return doc.getText(TEXT_KEY).toString();
+		return kind === "canvas" ? canvasText(doc) : doc.getText(TEXT_KEY).toString();
 	} finally {
 		doc.destroy();
 	}
 }
 
-/** Make a note's current text equal `text` (as a diff, so concurrent edits elsewhere survive). */
-export async function restoreNoteText(mirror: DiskMirror, docId: string, text: string): Promise<void> {
+/** Make a note's (or canvas's) current content equal `text` (as a diff, so concurrent edits elsewhere survive). */
+export async function restoreNoteText(mirror: DiskMirror, docId: string, text: string, kind = "md"): Promise<void> {
 	const doc = await mirror.space.acquireSynced(docId);
 	try {
-		applyTextDiff(textOf(doc), text, LOCAL_ORIGIN);
+		contentModel(kind).write(doc, text, null);
 	} finally {
 		mirror.space.release(docId);
 	}
