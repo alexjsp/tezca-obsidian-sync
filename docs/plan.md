@@ -81,7 +81,10 @@ Agreed 2026-11-23. Background and prior art: [research.md](research.md).
 ### Testing
 - Protocol/crypto unit tests in Go and TS with **shared golden vectors** (wrap/unwrap, frame encode, signature checks).
 - **Headless multi-client simulator:** N clients with mock vault filesystems against a real server, running randomized edits, renames, deletes, disconnects, and offline periods. It asserts convergence and no data loss, and is seeded for reproducibility.
-- No CI jobs for now; no real-Obsidian e2e for now.
+- No CI jobs for now.
+- **Real-Obsidian e2e suite** (`e2e/`, `just e2e`, added 2026-11-24): sandboxed Obsidian instances (one in
+  mobile emulation) driven through the plugin's real UI against a local server. Not run for every change;
+  see `e2e/README.md`.
 
 ## Architecture sketch
 
@@ -309,5 +312,30 @@ on rerun (each ≤ 1 in 4 on its seed):
 Next steps there: rerun those seeds with `TEZCA_TRACE`-style logging (the approach used throughout) until they
 reproduce.
 
-Not yet tried in real Obsidian: anything from M3–M5 (shares, guests, multiple hosts, live canvas, settings
-sync). The server for M3–M5 isn't deployed and no plugin release has been made since 0.2.0.
+The server for M3–M5 isn't deployed and no plugin release has been made since 0.2.0.
+
+## E2E suite in real Obsidian (2026-11-24)
+
+`e2e/` drives real Obsidian 1.15 (wdio-obsidian-service, one instance per device, phones in mobile
+emulation) through setup, sync, shares, guests, cross-host, history, Canvas and settings sync. 27 tests
+plus 1 skipped known issue. Bugs it found, all fixed (with unit/real-server tests where the logic allows):
+- A file deleted on disk just before sync started (another app, or Obsidian's file list lagging) made the
+  read throw, and the whole engine failed to start.
+- A folder renamed on one device left the empty old folder on the others; after a restart that folder was
+  even imported and synced back.
+- Rejoining a shared folder you'd left unmounted it straight away (the old mount's state read as "folder
+  deleted while closed").
+- A viewer's open note accepted Obsidian reloading it after an outside change, pushing that text into the
+  doc locally, and the mirror skipped restoring open files. Also: role changes didn't reach a note that was
+  already open until it was reopened.
+- Settings sync never picked up changes made while Obsidian was running: the engine's and the mirrors'
+  config scans shared one "seen" table, and the engine's scan (which ignores config) consumed the changes.
+
+Known issue: **Canvas views and remote changes.** Two people typing in the *same* card at the same time loses
+one side's typing about half the time (different cards are fine). An open Canvas view keeps its changes for
+~2s before saving (and saves from its own state, which `save()` alone doesn't refresh), while Tezca syncs
+canvases through the file. A remote write can land first, and the view then reloads over its unsaved edit.
+Flushing the view before writing didn't reliably help (and risks writing a stale view over a remote change).
+The fix is to treat an open Canvas like an open Markdown editor: apply remote changes through the view
+(`canvas.importData`/per-node updates) and take local changes from the view's data, not the file. Test:
+`E2E_KNOWN_ISSUES=1 just e2e canvas`.
