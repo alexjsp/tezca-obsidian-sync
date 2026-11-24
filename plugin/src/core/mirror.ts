@@ -4,11 +4,11 @@ import type * as Y from "yjs";
 import type { BlobClient, BlobRef } from "./blobs";
 import { bytesFingerprint, fingerprint, randomId } from "./crypto";
 import { REMOTE_ORIGIN, type DocSync } from "./doc-sync";
-import { IndexModel, canonicalPath, type Entry } from "./index-model";
+import { IndexModel, canonicalPath, conflictPath, type Entry } from "./index-model";
 import { INDEX_DOC, type SpaceSync } from "./space";
 import { applyCanvas, canvasText, sameCanvas } from "./canvas";
 import { applyTextDiff, retained, threeWayMerge } from "./text-diff";
-import type { VaultAdapter, VaultEvent } from "./vault";
+import { BACKUP_MAX_AGE_MS, type VaultAdapter, type VaultEvent } from "./vault";
 import { Emitter, log, Semaphore } from "./util";
 
 export const LOCAL_ORIGIN = "tezca-local";
@@ -27,6 +27,9 @@ interface MirrorState {
 	/** vault paths that are deliberately not synced (conflict artifacts, preserved files). */
 	localOnly: string[];
 }
+
+/** Keep a safety copy before a sync write that keeps less than this share of a file's text. */
+const BACKUP_RETAINED_BELOW = 0.8;
 
 export interface MirrorOptions {
 	/** Vault folder the space is mounted at; "" for the root space. */
@@ -239,6 +242,7 @@ export class DiskMirror {
 		this.early = [];
 		this.earlyGone.clear();
 		for (const ev of before) this.dispatchEvent(ev);
+		if (!this.opts.mount) void this.vault.pruneBackups?.(BACKUP_MAX_AGE_MS).catch((e) => log.warn("couldn't prune safety copies", e));
 		await this.enqueue(() => this.reconcileAll());
 		this.ready = true;
 		const during = this.early;
@@ -375,6 +379,26 @@ export class DiskMirror {
 		return this.index.resolvePaths().byPath.get(k);
 	}
 
+	// ───────────── local safety copies ─────────────
+
+	/** Keep a copy of a file's current content outside sync (best effort: never blocks sync). */
+	private async backup(vaultPath: string, data: string | Uint8Array): Promise<void> {
+		try {
+			await this.vault.backup?.(vaultPath, data);
+		} catch (e) {
+			log.warn(`couldn't keep a safety copy of ${vaultPath}`, e);
+		}
+	}
+
+	/** Before replacing (with `next`) or removing (null) a settings file, keep its current bytes. */
+	private async backupConfig(vaultPath: string, next: Uint8Array | null): Promise<void> {
+		const rel = this.toRel(vaultPath);
+		if (rel === null || !this.isConfigPath(rel)) return;
+		const cur = await this.vault.readBinary(vaultPath).catch(() => null);
+		if (!cur || !cur.length || (next && bytesFingerprint(cur) === bytesFingerprint(next))) return;
+		await this.backup(vaultPath, cur);
+	}
+
 	// ───────────── expected self-events ─────────────
 
 	/**
@@ -384,6 +408,9 @@ export class DiskMirror {
 	 */
 	private async selfWrite(vaultPath: string, text: string, expected?: string | null) {
 		if (expected !== undefined && (await this.vault.read(vaultPath)) !== expected) throw new DiskChanged(vaultPath);
+		// Overwriting a file in a way that loses much of it: keep the old text locally first.
+		if (typeof expected === "string" && expected !== text && expected.trim() && retained(expected, text) < BACKUP_RETAINED_BELOW)
+			await this.backup(vaultPath, expected);
 		const list = this.expectedWrites.get(vaultPath) ?? [];
 		list.push(fingerprint(text));
 		if (list.length > 8) list.shift();
@@ -394,6 +421,7 @@ export class DiskMirror {
 	/** Write bytes we own; with `expected` (a disk hash, or null for "absent") a compare-and-swap. */
 	private async selfWriteBinary(vaultPath: string, data: Uint8Array, expected?: string | null) {
 		if (expected !== undefined && (await this.diskHash(vaultPath, "blob")) !== expected) throw new DiskChanged(vaultPath);
+		await this.backupConfig(vaultPath, data);
 		const list = this.expectedWrites.get(vaultPath) ?? [];
 		list.push(bytesFingerprint(data));
 		if (list.length > 8) list.shift();
@@ -416,6 +444,7 @@ export class DiskMirror {
 	}
 
 	private async selfRemove(vaultPath: string) {
+		await this.backupConfig(vaultPath, null); // settings files are deleted outright, not trashed
 		this.expectedDeletes.add(vaultPath);
 		try {
 			await this.vault.remove(vaultPath);
@@ -498,6 +527,12 @@ export class DiskMirror {
 	}
 
 	private async writeConflictCopyBinary(vaultPath: string, data: Uint8Array, why: string): Promise<string> {
+		const rel = this.toRel(vaultPath);
+		if (rel !== null && this.isConfigPath(rel)) {
+			// A copy next to a settings file would just be clutter Obsidian never reads.
+			await this.backup(vaultPath, data);
+			return vaultPath;
+		}
 		let p = this.conflictCopyPath(vaultPath, 1);
 		for (let i = 2; await this.vault.exists(p); i++) p = this.conflictCopyPath(vaultPath, i);
 		this.addLocalOnly(p);
@@ -520,8 +555,7 @@ export class DiskMirror {
 
 	private async reconcileAll(force = false): Promise<void> {
 		// 1. deterministic resolution of path collisions in the index
-		const { renames } = this.index.resolvePaths();
-		for (const r of renames) this.index.setPath(r.id, r.path, LOCAL_ORIGIN);
+		this.resolveCollisions();
 		let { byPath } = this.index.resolvePaths();
 
 		const disk = await this.vault.list();
@@ -956,6 +990,12 @@ export class DiskMirror {
 		const e = this.entryByPath(rel);
 		if (!e) return this.importNewFile(vp);
 		if (e.kind !== "blob") return;
+		if (!this.state.baselines[e.id] && this.isConfigPath(rel)) {
+			// A settings file is known by its path: this is a new version of it, not another file.
+			this.setBlobBaseline(e.id, rel, e.blob?.hash ?? "");
+			this.touch(e.id);
+			return;
+		}
 		if (!this.state.baselines[e.id]) {
 			// We never materialized this entry here: the file on disk is a different file.
 			await this.createBlobEntry(rel, D);
@@ -997,6 +1037,13 @@ export class DiskMirror {
 			const rel = this.toRel(vp)!;
 			const existing = this.entryByPath(rel);
 			if (existing && this.state.baselines[existing.id]) return this.onLocalBlobWrite(vp);
+			if (existing && existing.kind === "blob" && this.isConfigPath(rel)) {
+				// A settings file is the same file whichever device wrote it (e.g. a theme just
+				// installed here that another device has too): this write is a new version of it.
+				this.setBlobBaseline(existing.id, rel, existing.blob?.hash ?? "");
+				this.touch(existing.id);
+				return;
+			}
 			const D = await this.vault.readBinary(vp);
 			return D === null ? undefined : this.createBlobEntry(rel, D);
 		}
@@ -1035,15 +1082,61 @@ export class DiskMirror {
 
 	/** Apply deterministic renames for live entries sharing a path, and re-verify them. */
 	private applyCollisionRenames(): void {
-		const { renames } = this.index.resolvePaths();
-		for (const r of renames) {
-			const contested = canonicalPath(this.index.get(r.id)?.path ?? "");
-			this.index.setPath(r.id, r.path, LOCAL_ORIGIN);
+		const contested = new Map<string, string>();
+		for (const r of this.index.resolvePaths().renames) contested.set(r.id, canonicalPath(this.index.get(r.id)?.path ?? ""));
+		for (const r of this.resolveCollisions()) {
+			const k = contested.get(r.id) ?? "";
 			this.touch(r.id);
 			// The winner of the contested path must be re-verified too: the loser's file may be the
 			// one on disk there and is about to move away.
-			for (const e of this.index.live()) if (e.id !== r.id && canonicalPath(e.path) === contested) this.touch(e.id);
-			for (const [id, b] of Object.entries(this.state.baselines)) if (id !== r.id && canonicalPath(b.path) === contested) this.touch(id);
+			for (const e of this.index.live()) if (e.id !== r.id && canonicalPath(e.path) === k) this.touch(e.id);
+			for (const [id, b] of Object.entries(this.state.baselines)) if (id !== r.id && canonicalPath(b.path) === k) this.touch(id);
+		}
+	}
+
+	/** Is `rel` inside the synced Obsidian config folder? Those files are known by their path. */
+	private isConfigPath(rel: string): boolean {
+		const cfg = this.opts.config;
+		return !!cfg && (rel === cfg.dir || rel.startsWith(cfg.dir + "/"));
+	}
+
+	/**
+	 * Resolve entries that share a path. Normally the loser is renamed "name (id)" so both files
+	 * survive. A settings file is identified by its path (Obsidian only reads `app.json`, a
+	 * theme's `manifest.json`, …), so there the loser is dropped and the winner's content stays.
+	 * Also repairs settings files renamed that way by earlier versions. Returns the renames done.
+	 */
+	private resolveCollisions(): { id: string; path: string }[] {
+		this.repairRenamedConfig();
+		const done: { id: string; path: string }[] = [];
+		for (const r of this.index.resolvePaths().renames) {
+			const e = this.index.get(r.id);
+			if (e && e.kind !== "folder" && this.isConfigPath(e.path)) {
+				// Its file (if this device wrote it) is the one at the contested path, which the
+				// winner now owns: forget it rather than delete it; the winner's verify replaces it.
+				this.dropBaseline(e.id);
+				this.index.tombstone(e.id, LOCAL_ORIGIN);
+				for (const w of this.index.live()) if (canonicalPath(w.path) === canonicalPath(e.path)) this.touch(w.id);
+				continue;
+			}
+			this.index.setPath(r.id, r.path, LOCAL_ORIGIN);
+			done.push(r);
+		}
+		return done;
+	}
+
+	/** Undo "name (id).ext" renames of settings files (0.3.x renamed colliding ones). */
+	private repairRenamedConfig(): void {
+		for (const e of this.index.live()) {
+			if (e.kind === "folder" || !this.isConfigPath(e.path)) continue;
+			const m = /^(.*) \(([A-Za-z0-9_-]{6})\)(\.[^./]*)?$/.exec(e.path);
+			if (!m || m[2] !== e.id.slice(0, 6)) continue;
+			const original = m[1] + (m[3] ?? "");
+			if (conflictPath(original, e.id) !== e.path) continue;
+			const taken = this.index.live().some((o) => o.id !== e.id && canonicalPath(o.path) === canonicalPath(original));
+			if (taken) this.index.tombstone(e.id, LOCAL_ORIGIN); // a duplicate: the file at the real path stays
+			else this.index.setPath(e.id, original, LOCAL_ORIGIN); // the only copy: put it back where Obsidian looks
+			this.touch(e.id);
 		}
 	}
 
@@ -1163,8 +1256,7 @@ export class DiskMirror {
 
 	/** Apply remote index changes: creates, renames, deletes. */
 	private async applyRemoteIndex(): Promise<void> {
-		const { renames } = this.index.resolvePaths();
-		for (const r of renames) this.index.setPath(r.id, r.path, LOCAL_ORIGIN);
+		const renames = this.resolveCollisions();
 		const { byPath } = this.index.resolvePaths();
 		const folders = [...byPath.values()]
 			.filter((e) => e.kind === "folder" && this.inScope(this.toVault(e.path), "folder"))

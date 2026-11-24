@@ -106,3 +106,89 @@ describe("config sync", () => {
 		expect(b.vault.files.get(".obsidian/app.json")).toBe('{"from":"B"}');
 	});
 });
+
+describe("settings files are known by their path", () => {
+	const renamed = (v: MemoryVault) => [...v.files.keys()].filter((p) => p.startsWith(".obsidian/") && / \([A-Za-z0-9_-]{6}\)\.[a-z]+$/.test(p));
+	const text = async (v: MemoryVault, p: string) => {
+		const b = await v.readBinary(p);
+		return b === null ? null : new TextDecoder().decode(b);
+	};
+
+	it("two devices that both have the same settings files end up with one of each, never renamed", async () => {
+		const { host, id, spaceId } = await setupHost();
+		const va = new MemoryVault();
+		va.files.set(".obsidian/app.json", '{"from":"A"}');
+		va.files.set(".obsidian/themes/T/manifest.json", '{"name":"T"}');
+		va.files.set(".obsidian/themes/T/theme.css", "body{}");
+		const vb = new MemoryVault();
+		vb.files.set(".obsidian/app.json", '{"from":"B"}');
+		vb.files.set(".obsidian/themes/T/manifest.json", '{"name":"T"}');
+		vb.files.set(".obsidian/themes/T/theme.css", "body{}");
+		// Both turn settings sync on at the same time: each imports its own copies first.
+		const [a, b] = await Promise.all([start(host, id, spaceId, "A", ALL, va), start(host, id, spaceId, "B", ALL, vb)]);
+		await converged(a, b);
+		await eventually(async () => (await text(va, ".obsidian/app.json")) === (await text(vb, ".obsidian/app.json")), 5000, "same app.json");
+		expect(renamed(va)).toEqual([]);
+		expect(renamed(vb)).toEqual([]);
+		expect(await text(va, ".obsidian/themes/T/manifest.json")).toBe('{"name":"T"}');
+		expect(await text(vb, ".obsidian/themes/T/manifest.json")).toBe('{"name":"T"}');
+		// The device whose app.json lost kept its old one as a safety copy.
+		const winner = await text(va, ".obsidian/app.json");
+		const loser = winner === '{"from":"A"}' ? vb : va;
+		const kept = [...loser.backups.values()].map((v) => (typeof v === "string" ? v : new TextDecoder().decode(v)));
+		expect(kept).toContain(winner === '{"from":"A"}' ? '{"from":"B"}' : '{"from":"A"}');
+	});
+
+	it("repairs settings files that an earlier version renamed to \"name (id)\"", async () => {
+		const { host, id, spaceId } = await setupHost();
+		const va = new MemoryVault();
+		va.files.set(".obsidian/app.json", '{"spellcheck":true}');
+		va.files.set(".obsidian/themes/T/manifest.json", '{"name":"T"}');
+		const a = await start(host, id, spaceId, "A", ALL, va);
+		const b = await start(host, id, spaceId, "B", ALL);
+		await converged(a, b);
+		// What 0.3.x did: app.json renamed out of the way, and a second manifest entry renamed.
+		// (With the repair off, so the bad state reaches both disks as it did then.)
+		type Repairable = { repairRenamedConfig(): void };
+		const mirrors = [a, b].map((c) => c.engine.mirror as unknown as Repairable);
+		for (const m of mirrors) m.repairRenamedConfig = () => undefined;
+		const idx = a.engine.mirror!.index;
+		const app = idx.live().find((e) => e.path === ".obsidian/app.json")!;
+		const man = idx.live().find((e) => e.path === ".obsidian/themes/T/manifest.json")!;
+		const { conflictPath } = await import("../src/core/index-model");
+		idx.setPath(app.id, conflictPath(app.path, app.id), "test");
+		const dupId = "dupDupDupDupDupDup";
+		idx.create(dupId, conflictPath(man.path, dupId), "blob", "test");
+		idx.setBlob(dupId, man.blob!, "test");
+		await eventually(() => renamed(b.vault).length === 2, 5000, "B has the renamed files on disk");
+		expect(b.vault.files.has(".obsidian/app.json")).toBe(false);
+		// With the fix, the next index change puts them right (as the next startup would).
+		for (const m of mirrors) delete (m as Partial<Repairable>).repairRenamedConfig;
+		await a.vault.userWrite("poke.md", "x");
+		await eventually(() => renamed(a.vault).length === 0 && renamed(b.vault).length === 0, 8000, "repaired");
+		for (const v of [a.vault, b.vault]) {
+			expect(await text(v, ".obsidian/app.json")).toBe('{"spellcheck":true}');
+			expect(await text(v, ".obsidian/themes/T/manifest.json")).toBe('{"name":"T"}');
+		}
+	});
+
+	it("reinstalling a theme another device installed updates it in place", async () => {
+		const { host, id, spaceId } = await setupHost();
+		const va = new MemoryVault();
+		va.files.set(".obsidian/themes/T/manifest.json", '{"version":"1"}');
+		va.files.set(".obsidian/themes/T/theme.css", "v1");
+		const a = await start(host, id, spaceId, "A", ALL, va);
+		const b = await start(host, id, spaceId, "B", ALL);
+		await converged(a, b);
+		// B (re)installs a newer version of the theme.
+		await b.vault.userWriteBinary(".obsidian/themes/T/manifest.json", new TextEncoder().encode('{"version":"2"}'));
+		await b.vault.userWriteBinary(".obsidian/themes/T/theme.css", new TextEncoder().encode("v2"));
+		await eventually(async () => (await text(va, ".obsidian/themes/T/manifest.json")) === '{"version":"2"}', 5000, "A gets it");
+		await converged(a, b);
+		expect(renamed(va)).toEqual([]);
+		expect(renamed(vb(b))).toEqual([]);
+		expect(await text(va, ".obsidian/themes/T/theme.css")).toBe("v2");
+	});
+});
+
+const vb = (c: Client) => c.vault;

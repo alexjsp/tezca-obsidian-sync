@@ -393,3 +393,21 @@ describe("safety brake", () => {
 		expect(count(b2.vault)).toBe(2);
 	});
 });
+
+describe("local safety copies", () => {
+	it("keeps the old text before sync overwrites most of a closed note, not for small edits", async () => {
+		const long = "A long note with plenty of text in it.\n".repeat(20);
+		const { a, b } = await pair({ a: { "n.md": long } });
+		await converged(a, b);
+		await a.vault.userWrite("n.md", long + "One more line.\n");
+		await converged(a, b);
+		expect(b.vault.backups.size).toBe(0); // a small edit: no copy
+		await a.vault.userWrite("n.md", "Oops, almost everything is gone.\n");
+		await converged(a, b);
+		expect(b.vault.files.get("n.md")).toBe("Oops, almost everything is gone.\n");
+		const copies = [...b.vault.backups.entries()];
+		expect(copies.length).toBe(1);
+		expect(copies[0][0]).toMatch(/^\.tezca-backup\/\d{4}-\d{2}-\d{2}\/\d{9}\/n\.md$/);
+		expect(copies[0][1]).toBe(long + "One more line.\n");
+	});
+});

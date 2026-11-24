@@ -1,6 +1,6 @@
 // VaultAdapter backed by Obsidian's Vault API.
 import { TFile, TFolder, normalizePath, type App, type EventRef, type TAbstractFile } from "obsidian";
-import type { VaultAdapter, VaultEvent, VaultItem } from "../core/vault";
+import { BACKUP_DIR, backupPath, type VaultAdapter, type VaultEvent, type VaultItem } from "../core/vault";
 
 export class ObsidianVault implements VaultAdapter {
 	/** Seen state of config-folder files, for turning raw events and scans into create/modify/delete. */
@@ -166,6 +166,37 @@ export class ObsidianVault implements VaultAdapter {
 		await this.ensureParent(dest);
 		// vault.rename (not fileManager.renameFile): links were already updated on the originating device.
 		await this.vault.rename(f, dest);
+	}
+
+	async backup(path: string, data: string | Uint8Array): Promise<void> {
+		const p = backupPath(path);
+		await this.ensureRawDir(p.slice(0, p.lastIndexOf("/")));
+		const readme = `${BACKUP_DIR}/README.txt`;
+		if (!(await this.adapter.exists(readme)))
+			await this.adapter.write(
+				readme,
+				"Tezca keeps a copy of a file here before sync overwrites or removes it in a way that loses a lot of it, and before it replaces Obsidian settings files.\nCopies are grouped by date and time and deleted after 30 days. This folder isn't synced.\n",
+			);
+		if (typeof data === "string") await this.adapter.write(p, data);
+		else await this.adapter.writeBinary(p, data.slice().buffer);
+	}
+
+	async pruneBackups(maxAgeMs: number): Promise<void> {
+		if (!(await this.adapter.exists(BACKUP_DIR))) return;
+		const cutoff = new Date(Date.now() - maxAgeMs).toISOString().slice(0, 10);
+		const { folders } = await this.adapter.list(BACKUP_DIR);
+		for (const f of folders) {
+			const day = f.slice(f.lastIndexOf("/") + 1);
+			if (/^\d{4}-\d{2}-\d{2}$/.test(day) && day < cutoff) await this.adapter.rmdir(f, true);
+		}
+	}
+
+	private async ensureRawDir(dir: string) {
+		const parts = dir.split("/");
+		for (let i = 1; i <= parts.length; i++) {
+			const d = parts.slice(0, i).join("/");
+			if (d && !(await this.adapter.exists(d))) await this.adapter.mkdir(d);
+		}
 	}
 
 	async exists(path: string): Promise<boolean> {

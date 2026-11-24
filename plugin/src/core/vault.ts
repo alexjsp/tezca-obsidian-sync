@@ -27,6 +27,26 @@ export interface VaultAdapter {
 	rename(from: string, to: string): Promise<void>;
 	exists(path: string): Promise<boolean>;
 	onEvent(cb: (e: VaultEvent) => void): () => void;
+	/**
+	 * Keep a copy of a file's previous content outside sync (a local safety net, see `BACKUP_DIR`),
+	 * before sync overwrites or removes it.
+	 */
+	backup?(path: string, data: string | Uint8Array): Promise<void>;
+	/** Delete safety copies older than `maxAgeMs`. */
+	pruneBackups?(maxAgeMs: number): Promise<void>;
+}
+
+/** Where local safety copies go: a hidden folder at the vault root (Obsidian and Tezca ignore it). */
+export const BACKUP_DIR = ".tezca-backup";
+/** How long safety copies are kept. */
+export const BACKUP_MAX_AGE_MS = 30 * 24 * 3600_000;
+
+/** `.tezca-backup/<date>/<time> <path>` for a copy of `path` taken at `now`. */
+export function backupPath(path: string, now = new Date()): string {
+	const iso = now.toISOString(); // 2026-11-24T11:37:21.123Z
+	const day = iso.slice(0, 10);
+	const time = iso.slice(11, 19).replace(/:/g, "") + iso.slice(20, 23);
+	return `${BACKUP_DIR}/${day}/${time}/${path}`;
 }
 
 /** In-memory vault used by tests and the simulator. Emits events asynchronously like Obsidian. */
@@ -34,7 +54,15 @@ export class MemoryVault implements VaultAdapter {
 	/** Text files hold strings; binary files written with writeBinary hold bytes. */
 	files = new Map<string, string | Uint8Array>();
 	folders = new Set<string>();
+	/** Safety copies taken by sync (path → content), see `VaultAdapter.backup`. */
+	backups = new Map<string, string | Uint8Array>();
 	private listeners = new Set<(e: VaultEvent) => void>();
+
+	async backup(path: string, data: string | Uint8Array): Promise<void> {
+		let p = backupPath(path);
+		for (let i = 2; this.backups.has(p); i++) p = `${backupPath(path)} ${i}`;
+		this.backups.set(p, typeof data === "string" ? data : data.slice());
+	}
 
 	private emit(e: VaultEvent) {
 		setTimeout(() => {
