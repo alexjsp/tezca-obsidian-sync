@@ -1538,9 +1538,29 @@ export class DiskMirror {
 			})
 			.catch((err) => {
 				log.warn(`blob transfer ${key} failed; will retry`, err);
+				this.warnRejected(key, ids, err);
 				for (const id of ids) this.scheduleRetry(id);
 			})
 			.finally(() => this.inflight.delete(key));
+	}
+
+	/** Files the host refused to store, already reported (once each). */
+	private rejected = new Set<string>();
+
+	/**
+	 * Say so when the host refuses an upload for a reason retrying won't fix soon (a guest's storage
+	 * quota is full, or the file is over its limit). It's still retried, in case the limit is raised.
+	 */
+	private warnRejected(key: string, ids: Set<string>, err: unknown) {
+		const status = (err as { status?: number }).status;
+		if (!key.startsWith("u:") || (status !== 507 && status !== 413)) return;
+		for (const id of ids) {
+			const e = this.index.get(id);
+			if (!e || this.rejected.has(e.path)) continue;
+			this.rejected.add(e.path);
+			const why = status === 507 ? "your storage on this host is full" : "it's over this host's size limit";
+			this.notices.emit({ kind: "error", message: `"${this.toVault(e.path)}" isn't synced: ${why}. Ask the host's owner for more room.`, paths: [this.toVault(e.path)] });
+		}
 	}
 
 	private startDownload(entryId: string, ref: BlobRef): void {
