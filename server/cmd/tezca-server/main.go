@@ -196,6 +196,7 @@ func run() error {
 	handler := api.New(api.Config{
 		Store: st, Hub: hub, Notify: hub, ServerID: serverID, PublicURL: publicURL, Name: name, PluginRepo: pluginRepo, Logger: log,
 		Blobs: blobStore, MaxBlobBytes: int64(maxBlobMB) << 20, GuestQuotaBytes: int64(guestQuotaMB) << 20,
+		ClientIP: clientIP.IP,
 	})
 
 	ln, err := net.Listen("tcp", listen)
@@ -203,6 +204,10 @@ func run() error {
 		return err
 	}
 	log.Info("tezca-server listening", "addr", ln.Addr().String(), "data", dataDir, "blobs", blobLoc, "server_id", serverID)
+	for _, w := range startupWarnings(listen, publicURL, os.Getenv("TEZCA_CLAIM_CODE"), claimed) {
+		log.Warn(w)
+		fmt.Fprintf(os.Stderr, "\n%s\n  WARNING: %s\n%s\n\n", strings.Repeat("!", 72), w, strings.Repeat("!", 72))
+	}
 	if !claimed {
 		base := publicURL
 		if base == "" {

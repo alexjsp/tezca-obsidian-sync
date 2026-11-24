@@ -24,21 +24,21 @@ import (
 )
 
 const (
-	MaxPairing      = 64 << 10
-	MaxBody         = 256 << 10 // JSON request bodies; blob bodies have their own limit
-	BlobOverhead    = 40        // nonce(24) + Poly1305 tag(16)
-	DefaultMaxBlob  = 100 << 20
-	DefaultGuestMB  = 1024 // TEZCA_GUEST_QUOTA_MB
-	MaxSkew         = 300  // seconds
+	MaxPairing     = 64 << 10
+	MaxBody        = 256 << 10 // JSON request bodies; blob bodies have their own limit
+	BlobOverhead   = 40        // nonce(24) + Poly1305 tag(16)
+	DefaultMaxBlob = 100 << 20
+	DefaultGuestMB = 1024 // TEZCA_GUEST_QUOTA_MB
+	MaxSkew        = 300  // seconds
 	// DefaultBodyTimeout bounds reading a JSON request body; DefaultBlobIdleTimeout bounds each
 	// wait for more of a blob upload's body (an upload may take as long as it keeps moving).
 	DefaultBodyTimeout     = 30 * time.Second
 	DefaultBlobIdleTimeout = 60 * time.Second
-	PairingTTL      = 15 * time.Minute
-	DefaultInvite   = 7 * 24 * time.Hour
-	MaxInvite       = 30 * 24 * time.Hour
-	MinInvite       = time.Minute
-	ProtocolVersion = ws.ProtocolVersion
+	PairingTTL             = 15 * time.Minute
+	DefaultInvite          = 7 * 24 * time.Hour
+	MaxInvite              = 30 * 24 * time.Hour
+	MinInvite              = time.Minute
+	ProtocolVersion        = ws.ProtocolVersion
 	// DefaultPluginRepo is the GitHub repo people add in BRAT to install the plugin.
 	DefaultPluginRepo = "alexjsp/tezca-obsidian-sync"
 )
@@ -66,6 +66,13 @@ type Config struct {
 
 	BodyTimeout     time.Duration // default DefaultBodyTimeout
 	BlobIdleTimeout time.Duration // default DefaultBlobIdleTimeout
+
+	// ClientIP returns a request's client address, for per-address limits (default: the TCP peer).
+	ClientIP func(*http.Request) string
+	// FailBurst failed attempts at a claim code, invite token or pairing id are allowed per client
+	// address, then one more per FailEvery (defaults DefaultFailBurst, DefaultFailEvery).
+	FailBurst int
+	FailEvery time.Duration
 }
 
 // Notifier reaches live WebSocket sessions after a membership or key change.
@@ -84,6 +91,7 @@ type API struct {
 	log    *slog.Logger
 	mux    *http.ServeMux
 	replay *replayCache
+	fails  *failLimiter
 }
 
 // New returns the HTTP handler.
@@ -103,11 +111,21 @@ func New(cfg Config) *API {
 	if cfg.BlobIdleTimeout <= 0 {
 		cfg.BlobIdleTimeout = DefaultBlobIdleTimeout
 	}
+	if cfg.ClientIP == nil {
+		cfg.ClientIP = remoteIP
+	}
+	if cfg.FailBurst <= 0 {
+		cfg.FailBurst = DefaultFailBurst
+	}
+	if cfg.FailEvery <= 0 {
+		cfg.FailEvery = DefaultFailEvery
+	}
 	cfg.PublicURL = strings.TrimRight(cfg.PublicURL, "/")
 	if !ValidPluginRepo(cfg.PluginRepo) {
 		cfg.PluginRepo = DefaultPluginRepo
 	}
-	a := &API{cfg: cfg, log: cfg.Logger, mux: http.NewServeMux(), replay: newReplayCache()}
+	a := &API{cfg: cfg, log: cfg.Logger, mux: http.NewServeMux(), replay: newReplayCache(),
+		fails: newFailLimiter(cfg.FailBurst, cfg.FailEvery)}
 	m := a.mux
 	m.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "ok") })
 	m.HandleFunc("GET /api/info", a.info)
@@ -115,19 +133,19 @@ func New(cfg Config) *API {
 	m.HandleFunc("GET /favicon.ico", serveIcon)
 	m.HandleFunc("GET /apple-touch-icon.png", serveTouchIcon)
 	m.HandleFunc("GET /{$}", a.landing)
-	m.HandleFunc("GET /claim", a.claimPage)
-	m.HandleFunc("GET /claim/qr.png", a.claimQR)
+	m.HandleFunc("GET /claim", a.limited(a.claimPage))
+	m.HandleFunc("GET /claim/qr.png", a.limited(a.claimQR))
 	m.HandleFunc("GET /invite", a.invitePage)
 	m.HandleFunc("GET /invite.js", serveInviteJS)
 	m.HandleFunc("GET /qrcode.js", serveQRCodeJS)
-	m.HandleFunc("POST /api/claim", a.claim)
+	m.HandleFunc("POST /api/claim", a.limited(a.claim))
 	m.HandleFunc("POST /api/invites", a.createInvite)
 	m.HandleFunc("GET /api/invites", a.listInvites)
-	m.HandleFunc("POST /api/redeem", a.redeem)
+	m.HandleFunc("POST /api/redeem", a.limited(a.redeem))
 	m.HandleFunc("GET /api/users", a.listUsers)
 	m.HandleFunc("DELETE /api/users/{sign_pk}", a.removeUser)
 	m.HandleFunc("POST /api/pairings", a.createPairing)
-	m.HandleFunc("GET /api/pairings/{id}", a.takePairing)
+	m.HandleFunc("GET /api/pairings/{id}", a.limited(a.takePairing))
 	if cfg.Blobs != nil {
 		m.HandleFunc("PUT /api/spaces/{space_id}/blobs/{blob_id}", a.putBlob)
 		m.HandleFunc("GET /api/spaces/{space_id}/blobs/{blob_id}", a.getBlob) // GET patterns also match HEAD
@@ -135,7 +153,7 @@ func New(cfg Config) *API {
 	m.HandleFunc("POST /api/spaces/{space_id}/invites", a.createShareInvite)
 	m.HandleFunc("GET /api/spaces/{space_id}/invites", a.listShareInvites)
 	m.HandleFunc("DELETE /api/spaces/{space_id}/invites/{token}", a.revokeShareInvite)
-	m.HandleFunc("POST /api/share-invites/redeem", a.redeemShareInvite)
+	m.HandleFunc("POST /api/share-invites/redeem", a.limited(a.redeemShareInvite))
 	m.HandleFunc("PUT /api/spaces/{space_id}/keys", a.putKeys)
 	m.HandleFunc("PUT /api/spaces/{space_id}/members/{sign_pk}", a.setMemberRole)
 	m.HandleFunc("DELETE /api/spaces/{space_id}/members/{sign_pk}", a.removeMember)

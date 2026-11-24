@@ -134,6 +134,15 @@ user was in, since they still hold the old epochs' keys. The last admin can't be
 including themselves. All of a user's devices share one identity, so this removes every device; the
 person can rejoin with a new invite and a new identity.
 
+#### Rate limits
+
+The endpoints that check a secret from a caller who may not be a user yet (`POST /api/claim`,
+`GET /claim`, `GET /claim/qr.png`, `POST /api/redeem`, `POST /api/share-invites/redeem` and
+`GET /api/pairings/{id}`) share a budget of failed attempts per client address: 10, then one more
+every 10 s. Any 4xx answer counts as a failure; successes don't. Once the budget is spent they
+answer 429 with `Retry-After`. Behind a reverse proxy the client address comes from
+`X-Forwarded-For` when the proxy is in `TEZCA_TRUSTED_PROXIES`.
+
 Plugin deep links (handled by the plugin, not the server):
 - `obsidian://tezca?do=claim&host=<url>&code=<code>`
 - `obsidian://tezca?do=join&host=<url>&token=<token>`

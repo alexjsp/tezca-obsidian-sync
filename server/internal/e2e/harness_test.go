@@ -146,7 +146,8 @@ func newEnvAPI(t *testing.T, mod func(*ws.Config), apiMod func(*api.Config)) *en
 	hub := ws.NewHub(cfg)
 	apiClock := &offsetClock{}
 	acfg := api.Config{Store: st, Hub: hub, Notify: hub, ServerID: id, Name: "Test", Logger: log, Now: apiClock.Now,
-		Blobs: bs, MaxBlobBytes: testMaxBlob}
+		Blobs: bs, MaxBlobBytes: testMaxBlob,
+		FailBurst: 1000} // tests make many failed attempts on purpose; TestFailedAttemptLimit sets its own
 	if apiMod != nil {
 		apiMod(&acfg)
 	}

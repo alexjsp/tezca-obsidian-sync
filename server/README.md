@@ -15,10 +15,10 @@ go run ./cmd/tezca-server
 # … Claim this server: http://localhost:8080/claim?code=…
 ```
 
-For a fixed claim code (tests, the simulator):
+For a fixed claim code (tests, the simulator; only on loopback, since a short code is guessable):
 
 ```sh
-TEZCA_CLAIM_CODE=dev TEZCA_DATA_DIR=/tmp/tezca go run ./cmd/tezca-server
+TEZCA_LISTEN=127.0.0.1:8080 TEZCA_CLAIM_CODE=dev TEZCA_DATA_DIR=/tmp/tezca go run ./cmd/tezca-server
 ```
 
 Static binary:
@@ -35,10 +35,10 @@ For Docker, see [`deploy/README.md`](../deploy/README.md).
 |---|---|---|
 | `TEZCA_DATA_DIR` | `./data` | Directory for `tezca.db` (SQLite, WAL) and, with the filesystem blob store, `blobs/`. |
 | `TEZCA_LISTEN` | `:8080` | Listen address (plain HTTP). |
-| `TEZCA_PUBLIC_URL` | (unset) | Public base URL used in claim and invite links. If unset, the URL comes from `X-Forwarded-Proto`/`X-Forwarded-Host`/`Host`. |
+| `TEZCA_PUBLIC_URL` | (unset) | Public base URL used in claim and invite links. If unset, the URL comes from `X-Forwarded-Proto`/`X-Forwarded-Host`/`Host`, and the server logs a warning at startup unless it listens on loopback only. Set it for every deployment others can reach. |
 | `TEZCA_SERVER_NAME` | `Tezca` | Display name on the setup pages and in `/api/info`. |
 | `TEZCA_PLUGIN_REPO` | `alexjsp/tezca-obsidian-sync` | GitHub `owner/repo` of the Obsidian plugin. The home and invite pages tell people to add it in BRAT, and link to it. |
-| `TEZCA_CLAIM_CODE` | (random) | Presets the claim code while the server is unclaimed. |
+| `TEZCA_CLAIM_CODE` | (random) | Presets the claim code while the server is unclaimed. A code shorter than 16 characters gets a startup warning: anyone who can reach an unclaimed server and guesses it becomes its admin. Failed claim attempts are rate-limited per client address. |
 | `PUID` / `PGID` | (unset) | When the container is started as root (`--user 0:0`, as the Unraid template does), the server gives the data directory to this user and group and then runs as them. Unraid uses `99` / `100`. |
 | `TEZCA_DEBUG` | (unset) | Any value enables debug logging. |
 | `TEZCA_MAX_BLOB_MB` | `100` | Largest attachment (plaintext MiB). Uploads over this + 40 bytes of encryption overhead get 413. Shown to clients as `max_blob_bytes` in `/api/info`. |
