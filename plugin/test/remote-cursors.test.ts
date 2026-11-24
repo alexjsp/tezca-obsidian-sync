@@ -32,7 +32,7 @@ function setup(text: string) {
 		applyAwarenessUpdate(awB, encodeAwarenessUpdate(awA, [a.clientID]), "remote");
 	};
 	const carets = () => view.dom.querySelectorAll(".tezca-caret").length;
-	return { view, select, carets };
+	return { view, select, carets, awA, awB, a };
 }
 
 describe("remote cursors", () => {
@@ -52,5 +52,18 @@ describe("remote cursors", () => {
 			await new Promise((r) => setTimeout(r, 0));
 			expect(carets(), `selection ${anchor}..${head}`).toBe(1);
 		}
+	});
+});
+
+describe("remote cursors with hostile presence", () => {
+	it("never puts an unchecked colour into the page's styles", async () => {
+		const { view, select, awA } = setup("Some text here\n");
+		awA.setLocalStateField("user", { name: "Mallory", color: "red; position:fixed; inset:0", colorLight: "x; background:url(https://evil/x)" });
+		select(0, 9);
+		await new Promise((r) => setTimeout(r, 0));
+		const html = view.dom.innerHTML;
+		expect(html).not.toContain("position:fixed");
+		expect(html).not.toContain("evil");
+		expect(view.dom.querySelectorAll(".tezca-caret").length).toBe(1);
 	});
 });
