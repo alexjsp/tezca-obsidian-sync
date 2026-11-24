@@ -1,0 +1,7 @@
+<?xml version="1.0"?>
+<CommunityApplications>
+  <Profile>Tezca is self-hosted, live, end-to-end encrypted sync for Obsidian, with shared folders you can edit together in real time. This repository holds the Tezca server container (the Obsidian plugin installs through BRAT). The server only ever stores encrypted data. For help, open an issue on GitHub.</Profile>
+  <Icon>https://raw.githubusercontent.com/alexjsp/tezca-obsidian-sync/main/assets/icon.png</Icon>
+  <WebPage>https://github.com/alexjsp/tezca-obsidian-sync</WebPage>
+  <Forum>https://github.com/alexjsp/tezca-obsidian-sync/issues</Forum>
+</CommunityApplications>

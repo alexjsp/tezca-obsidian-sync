@@ -8,10 +8,17 @@
   <Support>https://github.com/alexjsp/tezca-obsidian-sync/issues</Support>
   <Project>https://github.com/alexjsp/tezca-obsidian-sync</Project>
   <Overview>Tezca is a self-hosted sync server for Obsidian: live, end-to-end encrypted sync between your devices, and shared folders you can edit together in real time. The server only ever stores encrypted data.[br][br]Set Public URL to the address your devices will use (Obsidian on phones needs HTTPS, so put it behind a reverse proxy such as Nginx Proxy Manager, or use Tailscale). After the first start, open the WebUI to see how to claim the server: the claim link is in the container's log. Install the Tezca plugin in Obsidian with BRAT (alexjsp/tezca-obsidian-sync).</Overview>
-  <Category>Productivity: Tools: Cloud:</Category>
+  <Category>Productivity: Cloud: Tools:</Category>
   <WebUI>http://[IP]:[PORT:8080]/</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/alexjsp/tezca-obsidian-sync/main/unraid/tezca.xml</TemplateURL>
   <Icon>https://raw.githubusercontent.com/alexjsp/tezca-obsidian-sync/main/assets/icon.png</Icon>
+  <ReadMe>https://github.com/alexjsp/tezca-obsidian-sync#readme</ReadMe>
+  <ExtraSearchTerms>obsidian sync notes markdown e2ee encrypted collaboration self-hosted livesync</ExtraSearchTerms>
+  <License>MIT</License>
+  <MinVer>6.12.0</MinVer>
+  <Date>2026-11-24</Date>
+  <Changes>### 0.3.3
+- First Unraid template. Runs as nobody:users (PUID 99 / PGID 100) with data in /mnt/user/appdata/tezca.</Changes>
   <ExtraParams>--user 0:0</ExtraParams>
   <PostArgs/>
   <Requires>A domain name with HTTPS (for example through Nginx Proxy Manager, Cloudflare Tunnel or Tailscale) if you want to sync phones and tablets.</Requires>
