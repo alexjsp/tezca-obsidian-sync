@@ -2,8 +2,7 @@
 
 /** Pixel size of the stored picture (shown at up to ~24px, so 2x is plenty). */
 const SIZE = 64;
-/** Largest data URL we store (it's copied into every shared folder's member list). */
-export const MAX_AVATAR_CHARS = 24_000;
+import { MAX_AVATAR_CHARS, safeAvatar, safeColor } from "../core/presence";
 
 /** Ask the user for an image file (works with the phone's photo picker too). */
 export function pickImage(doc: Document = document): Promise<File | null> {
@@ -55,9 +54,10 @@ export function renderAvatar(el: HTMLElement, p: { name: string; color: string; 
 	el.empty();
 	delete el.dataset.initial;
 	el.addClass("tezca-avatar");
-	el.style.backgroundColor = p.color;
+	el.style.backgroundColor = safeColor(p.color, "#868e96");
 	// The initial is drawn by CSS (data-initial), so it isn't part of the surrounding text.
-	if (p.avatar) el.createEl("img", { attr: { src: p.avatar, alt: "" } });
+	const avatar = safeAvatar(p.avatar);
+	if (avatar) el.createEl("img", { attr: { src: avatar, alt: "" } });
 	else el.dataset.initial = (p.name.trim()[0] ?? "?").toUpperCase();
 	el.setAttr("title", p.name);
 	el.setAttr("aria-hidden", "true");

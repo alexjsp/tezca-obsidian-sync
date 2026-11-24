@@ -7,6 +7,7 @@ import { HostConnection, type ConnStatus, type WSCtor } from "./connection";
 import { fromB64u, newSpaceKey, randomBytes, unwrapInvite, wrapForInvite, wrapKey, b64u, type Identity } from "./crypto";
 import { anyConfig, configFileIncluded, configFolderIncluded, type ConfigCategories } from "./config-sync";
 import { DEFAULT_MAX_BLOB_BYTES, DiskMirror, LOCAL_ORIGIN, type MirrorNotice } from "./mirror";
+import { safeAvatar, safeColor, safeName } from "./presence";
 import { Mounts, mountPathProblem, safeFolderName, within, type Mount } from "./mounts";
 import { HostApi, ShareApi, createSpace, fetchHttp, listSpaces, normalizeHost, waitOnline, type HttpFn, type ShareRole } from "./setup";
 import { SpaceSync } from "./space";
@@ -502,7 +503,7 @@ export class SyncEngine {
 	myAvatar(): string | undefined {
 		try {
 			const p = JSON.parse(this.root?.space.index.ydoc.getMap<string>("members").get(this.myKey) ?? "{}") as { avatar?: string };
-			return typeof p.avatar === "string" ? p.avatar : undefined;
+			return safeAvatar(p.avatar) ?? undefined;
 		} catch {
 			return undefined;
 		}
@@ -617,7 +618,9 @@ export class SyncEngine {
 			} catch {
 				/* ignore */
 			}
-			return { signPk: m.signPk, role: m.role, name: prof.name, color: prof.color, avatar: prof.avatar, isMe: k === me };
+			// Profiles are written by members themselves (or anyone who can edit): validate them.
+			const color = typeof prof.color === "string" ? safeColor(prof.color, "") || undefined : undefined;
+			return { signPk: m.signPk, role: m.role, name: safeName(prof.name), color, avatar: safeAvatar(prof.avatar) ?? undefined, isMe: k === me };
 		});
 	}
 

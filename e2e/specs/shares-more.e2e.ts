@@ -87,7 +87,7 @@ describe("shares: more", function () {
 		await bob.exec(
 			({ app, plugins }, manifest, mainJs) => {
 				const inst = plugins.tezcaSync.installer;
-				inst.lookup = async () => "someone/garden-helper";
+				inst.directoryEntry = async (id: string) => ({ id, name: manifest.name, author: manifest.author, repo: "someone/garden-helper" });
 				inst.remoteManifest = async () => manifest;
 				app.plugins.installPlugin = async (_repo: string, _version: string, m: { id: string }) => {
 					const dir = `${app.vault.configDir}/plugins/${m.id}`;

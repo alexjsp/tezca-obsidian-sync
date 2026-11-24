@@ -2,7 +2,7 @@
 // them (anyone, offered when joining).
 import { App, Modal, Notice, Setting } from "obsidian";
 import type { RecommendedPlugin } from "../core/engine";
-import type { PluginInstaller } from "./plugin-installer";
+import type { DirectoryEntry, PluginInstaller } from "./plugin-installer";
 
 /** Pick which of your installed plugins this shared folder recommends. */
 export class ChooseRecommendedModal extends Modal {
@@ -53,7 +53,11 @@ export class ChooseRecommendedModal extends Modal {
 	}
 }
 
-/** Offer to install (and enable) a shared folder's recommended plugins. */
+/**
+ * Offer to install (and enable) a shared folder's recommended plugins. The list only says which
+ * plugin ids are recommended: names and authors shown here come from Obsidian's community
+ * directory (or this device), never from the share, so a plugin can't pose as another.
+ */
 export class InstallRecommendedModal extends Modal {
 	constructor(
 		app: App,
@@ -66,27 +70,54 @@ export class InstallRecommendedModal extends Modal {
 
 	onOpen() {
 		this.setTitle(`Plugins recommended for "${this.shareName}"`);
+		this.contentEl.createEl("p", { text: "Loading plugin details…" });
+		void this.render();
+	}
+
+	private async render() {
+		const details = await Promise.all(
+			this.plugins.map(async (p) => {
+				const local = this.installer.installed().find((m) => m.id === p.id);
+				let listed: DirectoryEntry | null = null;
+				try {
+					listed = await this.installer.directoryEntry(p.id);
+				} catch {
+					/* offline: show what we know */
+				}
+				return { p, local, listed };
+			}),
+		);
 		const { contentEl } = this;
+		contentEl.empty();
 		contentEl.createEl("p", {
 			text: "The members of this shared folder recommend these community plugins for its notes. Plugins run code on your device, so only install ones you trust.",
 		});
 		if (this.installer.restricted)
 			contentEl.createEl("p", { cls: "tezca-warning", text: "Community plugins are turned off in this vault (Restricted mode). Installing turns them on." });
 		const selected = new Set<string>();
-		for (const p of this.plugins) {
+		for (const { p, local, listed } of details) {
 			const state = this.installer.state(p.id);
-			const s = new Setting(contentEl).setName(p.name);
+			const name = listed?.name ?? local?.name ?? p.id;
+			const author = listed?.author ?? local?.author;
+			const s = new Setting(contentEl).setName(name);
+			const desc = [author ? `By ${author}` : "", `ID: ${p.id}`];
 			if (state === "enabled") {
-				s.setDesc("Installed and enabled");
+				s.setDesc([...desc, "Installed and enabled"].filter(Boolean).join(" · "));
 				continue;
 			}
-			s.setDesc(state === "disabled" ? "Installed, but turned off" : p.author ? `By ${p.author}` : "Not installed");
-			selected.add(p.id);
-			s.addToggle((t) => t.setValue(true).onChange((v) => (v ? selected.add(p.id) : selected.delete(p.id))));
+			if (state === "missing" && !listed) {
+				s.setDesc([...desc, "Not in Obsidian's community plugin directory, so it can't be installed from here"].filter(Boolean).join(" · "));
+				continue;
+			}
+			s.setDesc([...desc, state === "disabled" ? "Installed, but you turned it off" : ""].filter(Boolean).join(" · "));
+			// Something you turned off stays off unless you tick it.
+			if (state === "missing") selected.add(p.id);
+			s.addToggle((t) => t.setValue(state === "missing").onChange((v) => (v ? selected.add(p.id) : selected.delete(p.id))));
 		}
 		const buttons = new Setting(contentEl);
-		if (!selected.size) {
-			buttons.setDesc("You have all of them already.").addButton((b) => b.setButtonText("Close").setCta().onClick(() => this.close()));
+		const installable = details.filter(({ p, listed }) => this.installer.state(p.id) === "disabled" || (this.installer.state(p.id) === "missing" && listed));
+		if (!installable.length) {
+			buttons.setDesc("Nothing to install.").addButton((b) => b.setButtonText("Close").setCta().onClick(() => this.close()));
 			return;
 		}
 		buttons
@@ -96,13 +127,14 @@ export class InstallRecommendedModal extends Modal {
 					.setButtonText("Install and enable")
 					.setCta()
 					.onClick(async () => {
+						if (!selected.size) return this.close();
 						b.setDisabled(true).setButtonText("Installing…");
 						const failed: string[] = [];
-						for (const p of this.plugins.filter((x) => selected.has(x.id))) {
+						for (const { p, listed, local } of details.filter((d) => selected.has(d.p.id))) {
 							try {
-								await this.installer.installAndEnable(p);
+								await this.installer.installAndEnable({ id: p.id, name: listed?.name ?? local?.name ?? p.id });
 							} catch (e) {
-								failed.push((e as Error).message || p.name);
+								failed.push((e as Error).message || p.id);
 							}
 						}
 						this.close();

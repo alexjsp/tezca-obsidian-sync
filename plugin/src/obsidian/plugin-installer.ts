@@ -18,8 +18,16 @@ interface PluginManager {
 
 export type PluginState = "enabled" | "disabled" | "missing";
 
+export interface DirectoryEntry {
+	id: string;
+	name: string;
+	author: string;
+	repo: string;
+	description?: string;
+}
+
 export class PluginInstaller {
-	private directory: Promise<Map<string, string>> | null = null;
+	private directory: Promise<Map<string, DirectoryEntry>> | null = null;
 
 	constructor(
 		private readonly app: App,
@@ -48,11 +56,11 @@ export class PluginInstaller {
 		return !this.plugins.isEnabled();
 	}
 
-	/** id → GitHub repo, from Obsidian's community plugin directory. */
-	async lookup(id: string): Promise<string | null> {
+	/** A plugin's entry in Obsidian's community plugin directory (its real name, author and repo), or null. */
+	async directoryEntry(id: string): Promise<DirectoryEntry | null> {
 		if (!this.directory)
 			this.directory = requestUrl({ url: DIRECTORY_URL })
-				.then((r) => new Map((r.json as { id: string; repo: string }[]).map((p) => [p.id, p.repo])))
+				.then((r) => new Map((r.json as DirectoryEntry[]).filter((p) => p && typeof p.id === "string").map((p) => [p.id, p])))
 				.catch((e) => {
 					this.directory = null;
 					throw e;
@@ -73,8 +81,8 @@ export class PluginInstaller {
 		const pm = this.plugins;
 		if (this.restricted) await pm.setEnable(true);
 		if (!pm.manifests[p.id]) {
-			const repo = await this.lookup(p.id);
-			if (!repo) throw new Error(`${p.name} isn't in Obsidian's community plugin directory, so it has to be installed by hand.`);
+			const repo = (await this.directoryEntry(p.id))?.repo;
+			if (!repo) throw new Error(`${p.id} isn't in Obsidian's community plugin directory, so it has to be installed by hand.`);
 			const manifest = await this.remoteManifest(repo);
 			if (manifest.id !== p.id) throw new Error(`${p.name}'s repository doesn't match its listing.`);
 			const ok = await pm.installPlugin(repo, manifest.version, manifest);

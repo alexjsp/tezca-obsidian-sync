@@ -4,6 +4,7 @@ import { EditorView, ViewPlugin, type PluginValue, type ViewUpdate } from "@code
 import { editorInfoField } from "obsidian";
 import { YSyncConfig, ySync, ySyncAnnotation, ySyncFacet } from "y-codemirror.next";
 import { remoteCursors, type CursorUser } from "./remote-cursors";
+import { safeAvatar, safeColor, safeName } from "../core/presence";
 import type { DocSync } from "../core/doc-sync";
 import type { SpaceSync } from "../core/space";
 import { textOf } from "../core/mirror";
@@ -33,7 +34,7 @@ export function avatarIn(space: SpaceSync | null, user: CursorUser): string | nu
 	if (!space || !user.pk) return null;
 	try {
 		const p = JSON.parse(space.index.ydoc.getMap<string>("members").get(user.pk) ?? "{}") as { avatar?: string };
-		return typeof p.avatar === "string" && p.avatar.startsWith("data:image/") ? p.avatar : null;
+		return safeAvatar(p.avatar);
 	} catch {
 		return null;
 	}
@@ -220,7 +221,8 @@ export class EditorBindings {
 		aw.getStates().forEach((state, clientId) => {
 			if (clientId === aw.clientID) return;
 			const u = (state as { user?: CursorUser }).user;
-			if (u?.name) out.push({ name: u.name, color: u.color ?? "var(--text-muted)", avatar: avatarIn(b.space, u) });
+			const name = safeName(u?.name);
+			if (u && name) out.push({ name, color: safeColor(u.color, "#868e96"), avatar: avatarIn(b.space, u) });
 		});
 		return out;
 	}

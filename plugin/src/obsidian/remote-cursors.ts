@@ -5,6 +5,7 @@ import { Annotation, RangeSet, type Range } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import * as Y from "yjs";
 import { ySyncFacet } from "y-codemirror.next";
+import { safeColor, safeName } from "../core/presence";
 
 /** Someone's presence as sent in awareness: name, colour and their key (to look up a picture). */
 export interface CursorUser {
@@ -126,9 +127,9 @@ export function remoteCursors(avatarFor: AvatarLookup) {
 					const head = Y.createAbsolutePositionFromRelativePosition(cursor.head as Y.RelativePosition, ydoc);
 					if (!anchor || !head || anchor.type !== ytext || head.type !== ytext) return;
 					const user = (state.user ?? {}) as CursorUser;
-					const color = user.color ?? "#30bced";
-					const name = user.name ?? "Someone";
-					const light = user.colorLight ?? color + "33";
+					const color = safeColor(user.color, "#30bced");
+					const name = safeName(user.name) ?? "Someone";
+					const light = safeColor(user.colorLight, color.length === 7 ? color + "33" : color);
 					const docLen = update.view.state.doc.length;
 					const start = Math.min(anchor.index, head.index, docLen);
 					const end = Math.min(Math.max(anchor.index, head.index), docLen);
