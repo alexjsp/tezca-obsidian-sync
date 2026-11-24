@@ -1329,6 +1329,15 @@ export class DiskMirror {
 	}
 
 	private async handleRemoteDelete(e: Entry, vp: string): Promise<void> {
+		// Another live entry now owns this path (e.g. a duplicate of it was removed): the file is
+		// that entry's, not this one's to delete. Forget this one; the owner's verify keeps it right.
+		const rel = this.toRel(vp);
+		const owner = rel === null ? undefined : this.entryByPath(rel);
+		if (owner && owner.id !== e.id && !owner.deleted) {
+			this.dropBaseline(e.id);
+			this.touch(owner.id);
+			return;
+		}
 		const base = this.state.baselines[e.id];
 		const dh = await this.diskHash(vp, e.kind);
 		if (dh === null) {

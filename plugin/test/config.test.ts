@@ -41,14 +41,14 @@ afterEach(async () => {
 	clients = [];
 });
 
-async function start(host: MockHost, id: Awaited<ReturnType<typeof setupHost>>["id"], spaceId: string, name: string, categories: ConfigCategories, vault = new MemoryVault()) {
+async function start(host: MockHost, id: Awaited<ReturnType<typeof setupHost>>["id"], spaceId: string, name: string, categories: ConfigCategories, vault = new MemoryVault(), store = new MemoryStore()) {
 	const engine = new SyncEngine({
 		host: "http://mock",
 		identity: id,
 		deviceId: name,
 		deviceName: name,
 		spaceId,
-		store: new MemoryStore(),
+		store,
 		vault,
 		clientVersion: "test",
 		WebSocketImpl: host.WebSocket,
@@ -58,7 +58,7 @@ async function start(host: MockHost, id: Awaited<ReturnType<typeof setupHost>>["
 		config: { dir: ".obsidian", categories, ownPluginId: "tezca-sync" },
 	});
 	await engine.start();
-	const c = { name, vault, store: new MemoryStore(), engine };
+	const c = { name, vault, store, engine };
 	clients.push(c);
 	return c;
 }
@@ -197,6 +197,47 @@ describe("settings files are known by their path", () => {
 		await a.vault.userWrite("poke.md", "x");
 		await eventually(async () => (await text(b.vault, ".obsidian/themes/Things/manifest.json")) === '{"name":"Things"}' && renamed(b.vault).length === 0, 8000, "the real manifest is back");
 		expect(await text(a.vault, ".obsidian/themes/Things/manifest.json")).toBe('{"name":"Things"}');
+	});
+
+	it("removing a duplicate settings entry never deletes the file the surviving entry owns", async () => {
+		const { host, id, spaceId } = await setupHost();
+		const va = new MemoryVault();
+		va.files.set(".obsidian/snippets/x.css", "body{}");
+		const a = await start(host, id, spaceId, "A", ALL, va);
+		const vbB = new MemoryVault();
+		const storeB = new MemoryStore();
+		const b1 = await start(host, id, spaceId, "B", ALL, vbB, storeB);
+		await eventually(async () => (await text(vbB, ".obsidian/snippets/x.css")) === "body{}", 5000, "B has the snippet");
+		await converged(a, b1);
+		// The 0.3.x state: B has also recorded a second, identical entry at the same path (a
+		// duplicate from settings sync being turned on on two devices at once).
+		const idx = a.engine.mirror!.index;
+		const orig = idx.live().find((e) => e.path === ".obsidian/snippets/x.css")!;
+		type Internals = { state: { baselines: Record<string, { path: string }> }; scheduleStateSave(): void; repairRenamedConfig(): void };
+		const mb = b1.engine.mirror as unknown as Internals;
+		const dupId = "dupDupDupDupDupDup";
+		const { conflictPath } = await import("../src/core/index-model");
+		for (const m of [a.engine.mirror, b1.engine.mirror] as unknown as Internals[]) m.repairRenamedConfig = () => undefined;
+		idx.create(dupId, conflictPath(orig.path, dupId), "blob", "test");
+		idx.setBlob(dupId, orig.blob!, "test");
+		await eventually(() => b1.engine.mirror!.index.get(dupId) !== undefined, 5000, "B sees the duplicate");
+		await converged(a, b1);
+		mb.state.baselines[dupId] = { ...mb.state.baselines[orig.id], path: orig.path };
+		mb.scheduleStateSave();
+		// The repair removes the duplicate while B is running.
+		for (const m of [a.engine.mirror] as unknown as Internals[]) delete (m as Partial<Internals>).repairRenamedConfig;
+		await a.vault.userWrite("poke.md", "x");
+		await eventually(() => b1.engine.mirror!.index.get(dupId)?.deleted === true, 5000, "B sees the duplicate removed");
+		await converged(a, b1);
+		expect(await text(vbB, ".obsidian/snippets/x.css")).toBe("body{}");
+		await b1.engine.stop();
+		clients = clients.filter((c) => c !== b1);
+		// B opens again: nothing it did looks like the user deleting the snippet.
+		const b2 = await start(host, id, spaceId, "B", ALL, vbB, storeB);
+		await converged(a, b2);
+		expect(idx.get(orig.id)?.deleted).toBeFalsy();
+		expect(await text(vbB, ".obsidian/snippets/x.css")).toBe("body{}");
+		expect(await text(va, ".obsidian/snippets/x.css")).toBe("body{}");
 	});
 
 	it("reinstalling a theme another device installed updates it in place", async () => {
