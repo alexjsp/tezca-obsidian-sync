@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import { Device } from "../support/device";
-import { claimHost, pairDevice } from "../support/flows";
+import { claimHost, pairDevice, setDisplayName } from "../support/flows";
 import { TezcaServer } from "../support/server";
 import { conflictFiles, listFiles, png, waitConverged } from "../support/vault";
 import { sleep, waitFor } from "../support/wait";
@@ -54,9 +54,7 @@ describe("edge cases", function () {
 	});
 
 	it("shows the other device's cursor with its name, and keeps split panes of one note in step", async function () {
-		await phone.openSettings();
-		await (await phone.settingRow("Display name")).$("input").setValue("Phone person");
-		await phone.closeSettings();
+		await setDisplayName(phone, "Phone person");
 		await mac.write("Cursors.md", "Line one\nLine two\n");
 		await phone.waitForFile("Cursors.md");
 		await phone.open("Cursors.md");
@@ -72,7 +70,8 @@ describe("edge cases", function () {
 		// Choose a profile picture in the phone's settings (the file chooser gets a generated PNG).
 		const pngB64 = png(40, 30, [20, 160, 90]).toString("base64");
 		await phone.openSettings();
-		await phone.settingRow("Profile picture"); // selects the settings' window
+		await phone.clickButton("Edit…", await phone.settingRow("Profile"));
+		const profile = await phone.modal("Your profile"); // selects its window
 		await phone.browser.execute((b64: string) => {
 			const proto = HTMLInputElement.prototype as HTMLInputElement & { __click?: () => void };
 			proto.__click ??= proto.click;
@@ -85,8 +84,11 @@ describe("edge cases", function () {
 				this.dispatchEvent(new Event("change"));
 			};
 		}, pngB64);
-		await phone.clickButton("Choose…", await phone.settingRow("Profile picture"));
-		await phone.find(".tezca-avatar-large img");
+		await phone.clickButton("Choose…", await phone.settingRow("Picture", profile));
+		await phone.find(".tezca-profile-preview .tezca-avatar img");
+		await phone.clickButton("Save", profile);
+		await phone.noModal("Your profile");
+		await phone.find(".tezca-avatar-large img"); // the settings row shows it too
 		await phone.closeSettings();
 		const avatar = await phone.exec(({ plugins }) => plugins.tezcaSync.engine.myAvatar());
 		assert.match(avatar, /^data:image\/jpeg;base64,/);

@@ -2,7 +2,8 @@
 // same person, and disconnecting a vault.
 import assert from "node:assert/strict";
 import { Device } from "../support/device";
-import { claimHost, pasteSetupLink } from "../support/flows";
+import { resolve } from "node:path";
+import { claimHost, fillProfile, pasteSetupLink } from "../support/flows";
 import { TezcaServer } from "../support/server";
 import { listFiles, waitConverged } from "../support/vault";
 import { sleep, waitFor } from "../support/wait";
@@ -15,7 +16,12 @@ describe("setup: recovery phrase, second vault, disconnect", function () {
 
 	before(async function () {
 		server = await TezcaServer.start();
-		[mac, restored, other] = await Promise.all([Device.launch("mac"), Device.launch("new-laptop"), Device.launch("other-vault", { mobile: true })]);
+		[mac, restored, other] = await Promise.all([
+			Device.launch("mac"),
+			// A fresh install: shows the welcome (profile) screen.
+			Device.launch("new-laptop", { vault: resolve(import.meta.dirname, "..", "vaults", "fresh") }),
+			Device.launch("other-vault", { mobile: true }),
+		]);
 		// Also checks "Copy recovery phrase" works from the Settings window, where setup happens.
 		await claimHost(mac, server, { checkCopy: true });
 		await mac.write("Notes/Important.md", "Don't lose me.\n");
@@ -25,6 +31,16 @@ describe("setup: recovery phrase, second vault, disconnect", function () {
 	after(async function () {
 		for (const d of [mac, restored, other]) await d?.quit();
 		await server?.stop();
+	});
+
+	it("greets a fresh install with the profile screen, and keeps what's chosen there", async function () {
+		await fillProfile(restored, "Welcome to Tezca", "Alex on the laptop", "#2f9e44");
+		const s = await restored.exec(({ plugins }) => ({ name: plugins.tezcaSync.settings.displayName, color: plugins.tezcaSync.settings.color, asked: plugins.tezcaSync.settings.profileAsked }));
+		assert.deepEqual(s, { name: "Alex on the laptop", color: "#2f9e44", asked: true });
+		// Not shown again after a restart.
+		await restored.restart();
+		await new Promise((r) => setTimeout(r, 2000));
+		assert.ok(!(await restored.modalTitles()).some((t) => t.includes("Welcome")));
 	});
 
 	it("restores access on a new device from the recovery phrase", async function () {

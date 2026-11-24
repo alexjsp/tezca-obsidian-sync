@@ -1,5 +1,5 @@
 import { App, Notice, PluginSettingTab, Setting } from "obsidian";
-import { pickImage, renderAvatar, toAvatar } from "./avatar";
+import { renderAvatar } from "./avatar";
 import type TezcaPlugin from "../main";
 import { ShareModal } from "./share-modal";
 import { log } from "../core/util";
@@ -13,13 +13,16 @@ export class TezcaSettingTab extends PluginSettingTab {
 	}
 
 	private avatarEl: HTMLElement | null = null;
+	private nameEl: HTMLElement | null = null;
 
 	/** Redraw the profile picture preview (after it changes here or on another device). */
 	refreshProfile(): void {
 		const el = this.avatarEl;
 		const p = this.plugin;
 		if (!el || !el.isConnected) return;
-		renderAvatar(el, { name: p.settings.displayName || p.settings.deviceName, color: p.settings.color, avatar: p.engine?.myAvatar() });
+		const name = p.settings.displayName || p.settings.deviceName;
+		renderAvatar(el, { name, color: p.settings.color, avatar: p.currentAvatar() });
+		this.nameEl?.setText(name);
 	}
 
 	display(): void {
@@ -124,46 +127,11 @@ export class TezcaSettingTab extends PluginSettingTab {
 			}
 
 			containerEl.createEl("h3", { text: "Presence" });
-			const pic = new Setting(containerEl)
-				.setName("Profile picture")
-				.setDesc("Shown on your cursor and to the members of your shared folders. Applies to all your devices.");
-			this.avatarEl = pic.controlEl.createSpan({ cls: "tezca-avatar tezca-avatar-large" });
+			const prof = new Setting(containerEl).setName("Profile").setDesc("Your name, colour and picture, shown on your cursor and to the members of your shared folders.");
+			this.avatarEl = prof.controlEl.createSpan({ cls: "tezca-avatar tezca-avatar-large" });
+			this.nameEl = prof.controlEl.createSpan({ cls: "tezca-profile-name-label" });
 			this.refreshProfile();
-			pic.addButton((b) =>
-				b.setButtonText("Choose…").onClick(async () => {
-					const file = await pickImage(containerEl.ownerDocument);
-					if (!file) return;
-					try {
-						p.engine?.setAvatar(await toAvatar(file, containerEl.ownerDocument));
-						this.refreshProfile();
-					} catch (e) {
-						new Notice(`Tezca: ${(e as Error).message}`);
-					}
-				}),
-			);
-			pic.addExtraButton((b) =>
-				b
-					.setIcon("trash")
-					.setTooltip("Remove picture")
-					.onClick(() => {
-						p.engine?.setAvatar(null);
-						this.refreshProfile();
-					}),
-			);
-			new Setting(containerEl)
-				.setName("Display name")
-				.setDesc("Shown next to your cursor, and to the other members of your shared folders.")
-				.addText((t) =>
-					t
-						.setPlaceholder(p.settings.deviceName)
-						.setValue(p.settings.displayName)
-						.onChange(async (v) => {
-							p.settings.displayName = v.trim();
-							await p.saveSettings();
-							p.editors.updateUser();
-							p.engine?.updateProfile();
-						}),
-				);
+			prof.addButton((b) => b.setButtonText("Edit…").onClick(() => p.editProfile(false)));
 			new Setting(containerEl)
 				.setName("Device name")
 				.setDesc("Used in conflict file names.")
@@ -173,14 +141,6 @@ export class TezcaSettingTab extends PluginSettingTab {
 						await p.saveSettings();
 					}),
 				);
-			new Setting(containerEl).setName("Cursor colour").addColorPicker((c) =>
-				c.setValue(p.settings.color).onChange(async (v) => {
-					p.settings.color = v;
-					await p.saveSettings();
-					p.editors.updateUser();
-					p.engine?.updateProfile();
-				}),
-			);
 
 			containerEl.createEl("h3", { text: "Advanced" });
 			new Setting(containerEl).setName("Debug logging").addToggle((t) =>

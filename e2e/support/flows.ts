@@ -62,12 +62,23 @@ export async function openDeepLink(d: Device, link: string) {
 	}, params);
 }
 
-/** Set the presence name shown to others (settings → Display name). */
+/** Set the name shown to others (settings → Profile → Edit…). */
 export async function setDisplayName(d: Device, name: string) {
 	await d.openSettings();
-	const row = await d.settingRow("Display name");
-	await row.$("input").setValue(name);
+	await d.clickButton("Edit…", await d.settingRow("Profile"));
+	await fillProfile(d, "Your profile", name);
 	await d.closeSettings();
+}
+
+/** Fill in the profile screen (welcome or edit) and save. */
+export async function fillProfile(d: Device, title: string, name: string, color?: string) {
+	const m = await d.modal(title);
+	const input = await m.$("input.tezca-profile-name");
+	await input.clearValue();
+	await input.setValue(name);
+	if (color) await d.click((await m.$(`.tezca-swatch[data-color="${color}"]`)) as unknown as WebdriverIO.Element);
+	await d.clickButton("Save", m);
+	await d.noModal(title);
 }
 
 /** A tiny real community plugin (for plugin tests): sets window.__<id> when it loads. */

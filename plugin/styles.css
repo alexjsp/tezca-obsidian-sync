@@ -27,16 +27,23 @@
 .tezca-history-preview img { max-width: 100%; max-height: 50vh; }
 @media (max-width: 600px) { .tezca-history { flex-direction: column; } .tezca-history-list { flex-basis: auto; max-height: 30vh; border-right: none; } }
 .tezca-presence { display: flex; gap: 2px; align-items: center; }
-.tezca-avatar { display: inline-flex; flex: none; width: 16px; height: 16px; border-radius: 50%; align-items: center; justify-content: center; font-size: 10px; font-weight: 600; color: white; overflow: hidden; vertical-align: middle; }
+.tezca-avatar { display: inline-flex; flex: none; width: 20px; height: 20px; border-radius: 50%; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; color: white; overflow: hidden; vertical-align: middle; }
 .tezca-avatar[data-initial]::before, .tezca-caret-badge[data-initial]::before { content: attr(data-initial); }
 .tezca-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.tezca-avatar-large { width: 32px; height: 32px; font-size: 15px; margin-right: 4px; }
-.modal .setting-item-name .tezca-avatar { width: 20px; height: 20px; font-size: 11px; margin-right: 8px; }
+.tezca-avatar-large { width: 40px; height: 40px; font-size: 18px; margin-right: 4px; }
+.modal .setting-item-name .tezca-avatar { width: 24px; height: 24px; font-size: 12px; margin-right: 8px; }
+.tezca-profile-name-label { margin-right: 8px; font-weight: var(--font-semibold); }
+.tezca-profile-intro { color: var(--text-muted); }
+.tezca-profile-preview { display: flex; align-items: center; gap: 10px; padding: 12px 0 16px; }
+.tezca-profile-preview-line span { display: inline-block; padding: 2px 10px; border-radius: 12px; color: white; font-weight: 500; font-size: var(--font-ui-small); }
+.tezca-swatches { display: flex; flex-wrap: wrap; gap: 6px; margin-right: 8px; }
+.tezca-swatch { width: 22px; height: 22px; min-width: 0; padding: 0; border-radius: 50%; border: 2px solid transparent; box-shadow: none; cursor: pointer; }
+.tezca-swatch.is-active { border-color: var(--text-normal); }
 
 /* Other people's cursors: a coloured caret with their picture (or initial) above it; name on hover. */
 .tezca-caret { position: relative; display: inline; border-left: 2px solid; margin-left: -1px; margin-right: -1px; }
-.tezca-caret-badge { position: absolute; left: -9px; top: -20px; width: 18px; height: 18px; border-radius: 50%; border: 2px solid; box-sizing: border-box; display: flex; align-items: center; justify-content: center; overflow: hidden; color: white; font: 600 10px/1 var(--font-interface); user-select: none; z-index: 101; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25); }
+.tezca-caret-badge { position: absolute; left: -11px; top: -24px; width: 22px; height: 22px; border-radius: 50%; border: 2px solid; box-sizing: border-box; display: flex; align-items: center; justify-content: center; overflow: hidden; color: white; font: 600 11px/1 var(--font-interface); user-select: none; z-index: 101; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25); }
 .tezca-caret-badge img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.tezca-caret-name { position: absolute; left: 12px; top: -20px; padding: 1px 6px; border-radius: 9px; color: white; font: 500 11px/16px var(--font-interface); white-space: nowrap; user-select: none; pointer-events: none; z-index: 101; opacity: 0; transition: opacity 0.2s ease-in-out; }
+.tezca-caret-name { position: absolute; left: 14px; top: -22px; padding: 1px 6px; border-radius: 9px; color: white; font: 500 11px/16px var(--font-interface); white-space: nowrap; user-select: none; pointer-events: none; z-index: 101; opacity: 0; transition: opacity 0.2s ease-in-out; }
 .tezca-caret:hover .tezca-caret-name, .tezca-caret-badge:hover + .tezca-caret-name { opacity: 1; }
 .tezca-remote-selection { border-radius: 2px; }

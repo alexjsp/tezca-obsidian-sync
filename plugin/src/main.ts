@@ -24,6 +24,7 @@ import { DeletedFilesModal, HistoryModal } from "./obsidian/history-modal";
 import { ShareModal } from "./obsidian/share-modal";
 import { EditorBindings } from "./obsidian/editor";
 import { renderAvatar } from "./obsidian/avatar";
+import { PROFILE_COLORS, ProfileModal } from "./obsidian/profile-modal";
 import { PluginInstaller } from "./obsidian/plugin-installer";
 import { InstallRecommendedModal } from "./obsidian/recommended-plugins";
 import { LinkModal, RecoveryPhraseModal, choose, confirm, form } from "./obsidian/modals";
@@ -41,6 +42,10 @@ export interface TezcaSettings {
 	debug: boolean;
 	/** Which parts of the config folder sync from this device (all off by default). */
 	configSync: ConfigCategories;
+	/** The first-run profile screen has been shown on this device. */
+	profileAsked: boolean;
+	/** A picture chosen before sync was set up, published once it starts. */
+	pendingAvatar: string;
 }
 
 const DEFAULT_SETTINGS: TezcaSettings = {
@@ -53,12 +58,14 @@ const DEFAULT_SETTINGS: TezcaSettings = {
 	hostRole: "",
 	debug: false,
 	configSync: { ...NO_CONFIG },
+	profileAsked: false,
+	pendingAvatar: "",
 };
 
 /** Monochrome take on assets/icon.svg (an obsidian mirror) for Obsidian's 100×100 icon grid. */
 const TEZCA_ICON = `<ellipse cx="50" cy="50" rx="34" ry="42" fill="none" stroke="currentColor" stroke-width="8"/><ellipse cx="50" cy="50" rx="23" ry="31" fill="currentColor" opacity="0.35"/><path d="M38 66 L62 30" stroke="currentColor" stroke-width="4" stroke-linecap="round" opacity="0.8"/>`;
 
-const COLORS = ["#e8590c", "#1c7ed6", "#2f9e44", "#ae3ec9", "#f08c00", "#0c8599", "#e03131", "#5c7cfa"];
+const COLORS = PROFILE_COLORS;
 const KEYSTORE = "tezca-keys";
 
 const obsidianHttp: HttpFn = async ({ method, url, headers, body }) => {
@@ -217,7 +224,10 @@ export default class TezcaPlugin extends Plugin {
 		this.registerEvent(this.app.workspace.on("file-open", () => this.rebindOpenEditors()));
 		this.registerDomEvent(window, "online", () => this.engine?.conn.reconnectNow());
 		this.registerInterval(window.setInterval(() => void this.engine?.space?.flush(), 30_000));
-		this.app.workspace.onLayoutReady(() => void this.startEngine());
+		this.app.workspace.onLayoutReady(() => {
+			void this.startEngine();
+			if (!this.settings.profileAsked) this.editProfile(true);
+		});
 	}
 
 	async onunload() {
@@ -271,6 +281,41 @@ export default class TezcaPlugin extends Plugin {
 	}
 
 	// ───────────── engine ─────────────
+
+	/** This user's picture: from sync once it's running, else one chosen before setup. */
+	currentAvatar(): string | null {
+		return this.engine?.myAvatar() ?? (this.settings.pendingAvatar || null);
+	}
+
+	/** The profile screen: on first run (welcome) and from settings. */
+	editProfile(welcome: boolean) {
+		new ProfileModal(
+			this.app,
+			{ name: this.settings.displayName, color: this.settings.color, avatar: this.currentAvatar() },
+			{
+				welcome,
+				save: async (p) => {
+					this.settings.displayName = p.name;
+					this.settings.color = p.color;
+					if (p.avatar !== undefined) {
+						if (this.engine?.root) {
+							this.engine.setAvatar(p.avatar);
+							this.settings.pendingAvatar = "";
+						} else this.settings.pendingAvatar = p.avatar ?? "";
+					}
+					await this.saveSettings();
+					this.editors.updateUser();
+					this.engine?.updateProfile();
+					this.settingTab.refreshProfile();
+				},
+				onClose: () => {
+					if (this.settings.profileAsked) return;
+					this.settings.profileAsked = true; // asked once; it's in settings from now on
+					void this.saveSettings();
+				},
+			},
+		).open();
+	}
 
 	/** Engine starts and stops run one at a time (a stop closes the store a start may be using). */
 	private engineOps: Promise<void> = Promise.resolve();
@@ -348,6 +393,12 @@ export default class TezcaPlugin extends Plugin {
 			return;
 		}
 		if (this.engine !== engine) return;
+		// A picture chosen on the welcome screen before sync was set up.
+		if (this.settings.pendingAvatar && engine.root && !engine.myAvatar()) {
+			engine.setAvatar(this.settings.pendingAvatar);
+			this.settings.pendingAvatar = "";
+			await this.saveSettings();
+		}
 		this.rebindOpenEditors();
 	}
 
