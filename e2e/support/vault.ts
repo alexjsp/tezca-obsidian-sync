@@ -5,14 +5,14 @@ import { deflateSync } from "node:zlib";
 import type { Device } from "./device";
 import { waitFor } from "./wait";
 
-/** Every file in a vault (relative paths), skipping .obsidian and .trash. */
-export function listFiles(root: string, dir = ""): string[] {
+/** Every file in a vault (relative paths), skipping .trash and (unless `config`) .obsidian. */
+export function listFiles(root: string, dir = "", config = false): string[] {
 	const out: string[] = [];
 	for (const name of readdirSync(join(root, dir))) {
 		const rel = dir ? `${dir}/${name}` : name;
-		if (!dir && (name === ".obsidian" || name === ".trash" || name === ".gitkeep")) continue;
+		if (!dir && ((name === ".obsidian" && !config) || name === ".trash" || name === ".gitkeep")) continue;
 		if (name === ".DS_Store") continue;
-		if (statSync(join(root, rel)).isDirectory()) out.push(...listFiles(root, rel));
+		if (statSync(join(root, rel)).isDirectory()) out.push(...listFiles(root, rel, config));
 		else out.push(rel);
 	}
 	return out.sort();
@@ -63,7 +63,7 @@ function diff(snaps: Record<string, string>[], devices: Device[]) {
 
 /** Conflict copies the plugin made (e.g. "x (edited on Mac).md", "x (conflict …).md"). */
 export function conflictFiles(d: Device): string[] {
-	return listFiles(d.vaultPath).filter((f) => /\((edited on|conflict)/i.test(f));
+	return listFiles(d.vaultPath, "", true).filter((f) => /\((edited on|conflict)/i.test(f));
 }
 
 /** A valid PNG of one colour (w×h), for attachment tests. */

@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { Device } from "../support/device";
 import { claimHost, pairDevice } from "../support/flows";
 import { TezcaServer } from "../support/server";
+import { conflictFiles } from "../support/vault";
 import { waitFor } from "../support/wait";
 
 interface CanvasNode {
@@ -218,6 +219,90 @@ describe("canvas and settings sync", function () {
 			assert.notEqual(own(mac).deviceId, own(phone).deviceId, "each device keeps its own identity");
 			const ws = (d: Device) => d.read(".obsidian/workspace.json") ?? d.read(".obsidian/workspace-mobile.json");
 			assert.notEqual(ws(mac), ws(phone));
+		});
+
+		describe("community plugins", function () {
+			const DIR = ".obsidian/plugins/e2e-dummy";
+			const manifest = { id: "e2e-dummy", name: "E2E dummy", version: "1.0.0", minAppVersion: "1.0.0", description: "Test plugin", author: "e2e", isDesktopOnly: false };
+			// A real (tiny) plugin: loads its settings and exposes them so the test can see it running.
+			const mainJs = `const { Plugin } = require("obsidian");
+module.exports = class extends Plugin {
+	async onload() {
+		this.settings = Object.assign({ greeting: "hello" }, await this.loadData());
+		window.__e2eDummy = this.settings;
+	}
+	onunload() { delete window.__e2eDummy; }
+};
+`;
+			const running = (d: Device) => d.exec(({ app }) => (app.plugins.plugins["e2e-dummy"] ? ((window as unknown as { __e2eDummy?: { greeting: string } }).__e2eDummy?.greeting ?? "loaded") : null));
+			const enabledList = (d: Device) => JSON.parse(d.read(".obsidian/community-plugins.json") ?? "[]") as string[];
+
+			it("installs a plugin added on one device on the others that sync plugin code", async function () {
+				// Mac and phone sync plugin code too; the laptop syncs only the plugin list and settings.
+				for (const d of [mac, phone]) {
+					await d.openSettings();
+					await d.setToggle("Community plugin code", true);
+					await d.closeSettings();
+					await d.waitSynced();
+				}
+				await laptop.openSettings();
+				await laptop.setToggle("Community plugin list and settings", true);
+				await laptop.closeSettings();
+				await laptop.waitSynced();
+
+				// Install and enable it on the mac, the way Obsidian does after a download.
+				await mac.exec(
+					async ({ app }, dir, manifest, mainJs) => {
+						await app.vault.adapter.mkdir(dir);
+						await app.vault.adapter.write(`${dir}/manifest.json`, manifest);
+						await app.vault.adapter.write(`${dir}/main.js`, mainJs);
+						await app.plugins.loadManifests();
+						await app.plugins.enablePluginAndSave("e2e-dummy");
+					},
+					DIR,
+					JSON.stringify(manifest, null, "\t"),
+					mainJs,
+				);
+				assert.equal(await running(mac), "hello");
+
+				await phone.waitForFile(`${DIR}/main.js`, mainJs);
+				await phone.waitForFile(`${DIR}/manifest.json`);
+				await waitFor(() => enabledList(phone).includes("e2e-dummy"), { what: "phone's plugin list to include it" });
+				await phone.restart();
+				await phone.waitSynced(60_000);
+				await waitFor(async () => (await running(phone)) === "hello", { what: "the plugin to run on the phone", detail: () => running(phone) });
+				assert.ok(enabledList(phone).includes("tezca-sync"), "Tezca itself stays enabled");
+			});
+
+			it("syncs the plugin's settings, also to a device that doesn't sync plugin code", async function () {
+				await mac.exec(async ({ app }) => {
+					const p = app.plugins.plugins["e2e-dummy"];
+					p.settings.greeting = "hi from the mac";
+					await p.saveData(p.settings);
+				});
+				await phone.waitForFile(`${DIR}/data.json`, (c) => JSON.parse(c).greeting === "hi from the mac");
+				await laptop.waitForFile(`${DIR}/data.json`, (c) => JSON.parse(c).greeting === "hi from the mac");
+				await waitFor(() => enabledList(laptop).includes("e2e-dummy"), { what: "laptop's plugin list to include it" });
+				assert.equal(laptop.exists(`${DIR}/main.js`), false, "no plugin code on the laptop");
+				assert.equal(laptop.exists(`${DIR}/manifest.json`), false);
+				// The phone picks the new settings up when the plugin next loads.
+				await phone.restart();
+				await waitFor(async () => (await running(phone)) === "hi from the mac", { what: "new settings on the phone", detail: () => running(phone) });
+			});
+
+			it("disabling a plugin on one device disables it on the others (without uninstalling it)", async function () {
+				await phone.exec(async ({ app }) => app.plugins.disablePluginAndSave("e2e-dummy"));
+				assert.equal(await running(phone), null);
+				await mac.waitForFile(".obsidian/community-plugins.json", (c) => !JSON.parse(c).includes("e2e-dummy"));
+				await mac.restart();
+				await mac.waitSynced(60_000);
+				assert.equal(await running(mac), null, "not running on the mac after a reload");
+				assert.ok(mac.exists(`${DIR}/main.js`), "still installed on the mac");
+				assert.ok(enabledList(mac).includes("tezca-sync"));
+				assert.deepEqual(conflictFiles(mac), []);
+				assert.deepEqual(conflictFiles(phone), []);
+				assert.deepEqual(conflictFiles(laptop), []);
+			});
 		});
 	});
 });
