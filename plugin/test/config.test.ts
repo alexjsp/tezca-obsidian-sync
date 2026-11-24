@@ -174,6 +174,29 @@ describe("settings files are known by their path", () => {
 		}
 	});
 
+	it("repair keeps the real copy over an empty placeholder whose upload never finished", async () => {
+		const { host, id, spaceId } = await setupHost();
+		const va = new MemoryVault();
+		va.files.set(".obsidian/themes/Things/manifest.json", '{"name":"Things"}');
+		const a = await start(host, id, spaceId, "A", ALL, va);
+		const b = await start(host, id, spaceId, "B", ALL);
+		await converged(a, b);
+		type Repairable = { repairRenamedConfig(): void };
+		const mirrors = [a, b].map((c) => c.engine.mirror as unknown as Repairable);
+		for (const m of mirrors) m.repairRenamedConfig = () => undefined;
+		// 0.3.x state: the real manifest renamed away, and a content-less entry at the real path.
+		const idx = a.engine.mirror!.index;
+		const man = idx.live().find((e) => e.path === ".obsidian/themes/Things/manifest.json")!;
+		const { conflictPath } = await import("../src/core/index-model");
+		idx.setPath(man.id, conflictPath(man.path, man.id), "test");
+		idx.create("ghostGhostGhostGho", ".obsidian/themes/Things/manifest.json", "blob", "test");
+		await eventually(() => renamed(b.vault).length === 1, 5000, "B has the renamed manifest");
+		for (const m of mirrors) delete (m as Partial<Repairable>).repairRenamedConfig;
+		await a.vault.userWrite("poke.md", "x");
+		await eventually(async () => (await text(b.vault, ".obsidian/themes/Things/manifest.json")) === '{"name":"Things"}' && renamed(b.vault).length === 0, 8000, "the real manifest is back");
+		expect(await text(a.vault, ".obsidian/themes/Things/manifest.json")).toBe('{"name":"Things"}');
+	});
+
 	it("reinstalling a theme another device installed updates it in place", async () => {
 		const { host, id, spaceId } = await setupHost();
 		const va = new MemoryVault();

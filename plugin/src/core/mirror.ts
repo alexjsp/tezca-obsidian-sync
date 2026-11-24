@@ -1110,7 +1110,14 @@ export class DiskMirror {
 		this.repairRenamedConfig();
 		const done: { id: string; path: string }[] = [];
 		for (const r of this.index.resolvePaths().renames) {
-			const e = this.index.get(r.id);
+			let e = this.index.get(r.id);
+			if (e && e.kind === "blob" && this.isConfigPath(e.path) && e.blob) {
+				// The id order picked an empty placeholder (upload never finished) over a real copy:
+				// drop the placeholder instead.
+				const k = canonicalPath(e.path);
+				const empty = this.index.live().find((o) => o.id !== e!.id && o.kind === "blob" && !o.blob && canonicalPath(o.path) === k);
+				if (empty) e = empty;
+			}
 			if (e && e.kind !== "folder" && this.isConfigPath(e.path)) {
 				// Its file (if this device wrote it) is the one at the contested path, which the
 				// winner now owns: forget it rather than delete it; the winner's verify replaces it.
@@ -1133,9 +1140,15 @@ export class DiskMirror {
 			if (!m || m[2] !== e.id.slice(0, 6)) continue;
 			const original = m[1] + (m[3] ?? "");
 			if (conflictPath(original, e.id) !== e.path) continue;
-			const taken = this.index.live().some((o) => o.id !== e.id && canonicalPath(o.path) === canonicalPath(original));
-			if (taken) this.index.tombstone(e.id, LOCAL_ORIGIN); // a duplicate: the file at the real path stays
-			else this.index.setPath(e.id, original, LOCAL_ORIGIN); // the only copy: put it back where Obsidian looks
+			const there = this.index.live().filter((o) => o.id !== e.id && canonicalPath(o.path) === canonicalPath(original));
+			// Only a copy with content counts: an entry whose first upload never finished is an empty
+			// placeholder, and must not win over the real file.
+			const real = there.filter((o) => o.kind !== "blob" || o.blob);
+			if (real.length) this.index.tombstone(e.id, LOCAL_ORIGIN); // a duplicate: the file at the real path stays
+			else {
+				for (const o of there) this.index.tombstone(o.id, LOCAL_ORIGIN);
+				this.index.setPath(e.id, original, LOCAL_ORIGIN); // the only real copy: put it back where Obsidian looks
+			}
 			this.touch(e.id);
 		}
 	}
