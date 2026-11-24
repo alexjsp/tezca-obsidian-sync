@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"strings"
+	"time"
 )
 
 // ───────────── spaces ─────────────
@@ -171,6 +172,8 @@ type Update struct {
 	Author  []byte
 	Payload []byte
 	Sig     []byte
+	// CreatedAt is when the server stored it (unix ms); set by AppendUpdate.
+	CreatedAt int64
 }
 
 type Snapshot struct {
@@ -247,8 +250,12 @@ func (s *Store) AppendUpdate(ctx context.Context, spaceID, docID string, u Updat
 		d.LatestSeq++
 		d.UpdatesSinceSnapshot++
 		d.BytesSinceSnapshot += uint64(len(u.Payload))
-		if _, err := tx.Exec(`INSERT INTO updates(space_id, doc_id, seq, epoch, author, payload, sig) VALUES(?, ?, ?, ?, ?, ?, ?)`,
-			spaceID, docID, d.LatestSeq, u.Epoch, u.Author, u.Payload, u.Sig); err != nil {
+		created := u.CreatedAt
+		if created == 0 {
+			created = time.Now().UnixMilli()
+		}
+		if _, err := tx.Exec(`INSERT INTO updates(space_id, doc_id, seq, epoch, author, payload, sig, created_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
+			spaceID, docID, d.LatestSeq, u.Epoch, u.Author, u.Payload, u.Sig, created); err != nil {
 			return err
 		}
 		_, err = tx.Exec(`INSERT INTO docs(space_id, doc_id, latest_seq, snapshot_seq, updates_since_snapshot, bytes_since_snapshot)
@@ -263,9 +270,11 @@ func (s *Store) AppendUpdate(ctx context.Context, spaceID, docID string, u Updat
 	return d, nil
 }
 
-// PutSnapshot stores a snapshot with created_at = now (unix ms), prunes updates with
-// seq ≤ base_seq, applies the History retention policy as of now, and recomputes the
-// since-snapshot counters. Invalid base_seq → ErrConflict. The caller must hold the doc's lock.
+// PutSnapshot stores a snapshot with created_at = now (unix ms), applies the History retention
+// policy as of now (snapshots and the update log), and recomputes the since-snapshot counters.
+// Updates covered by the snapshot are kept for the history window (point-in-time restore); only
+// the ones older than that are dropped. Invalid base_seq → ErrConflict. The caller must hold
+// the doc's lock.
 func (s *Store) PutSnapshot(ctx context.Context, spaceID, docID string, sn Snapshot, now int64) (Doc, error) {
 	var d Doc
 	err := s.tx(ctx, func(tx *sql.Tx) error {
@@ -288,7 +297,7 @@ func (s *Store) PutSnapshot(ctx context.Context, spaceID, docID string, sn Snaps
 			spaceID, docID, sn.BaseSeq, sn.Epoch, sn.Author, sn.Payload, sn.Sig, now); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(`DELETE FROM updates WHERE space_id = ? AND doc_id = ? AND seq <= ?`, spaceID, docID, sn.BaseSeq); err != nil {
+		if err := s.pruneUpdates(tx, spaceID, docID, sn.BaseSeq, now); err != nil {
 			return err
 		}
 		if err := s.pruneSnapshots(tx, spaceID, docID, now); err != nil {
@@ -296,8 +305,8 @@ func (s *Store) PutSnapshot(ctx context.Context, spaceID, docID string, sn Snaps
 		}
 		d.SnapshotSeq = sn.BaseSeq
 		d.SnapshotCreatedAt = now
-		if err := tx.QueryRow(`SELECT COUNT(*), COALESCE(SUM(LENGTH(payload)), 0) FROM updates WHERE space_id = ? AND doc_id = ?`,
-			spaceID, docID).Scan(&d.UpdatesSinceSnapshot, &d.BytesSinceSnapshot); err != nil {
+		if err := tx.QueryRow(`SELECT COUNT(*), COALESCE(SUM(LENGTH(payload)), 0) FROM updates WHERE space_id = ? AND doc_id = ? AND seq > ?`,
+			spaceID, docID, sn.BaseSeq).Scan(&d.UpdatesSinceSnapshot, &d.BytesSinceSnapshot); err != nil {
 			return err
 		}
 		_, err = tx.Exec(`UPDATE docs SET snapshot_seq = ?, updates_since_snapshot = ?, bytes_since_snapshot = ? WHERE space_id = ? AND doc_id = ?`,
@@ -340,8 +349,18 @@ func (s *Store) SnapshotSeqs(ctx context.Context, spaceID, docID string) ([]uint
 // StreamUpdates calls fn with ascending batches of updates with seq > from. A batch closes at
 // maxCount updates or once its payload bytes reach maxBytes (always ≥ 1 update).
 func (s *Store) StreamUpdates(ctx context.Context, spaceID, docID string, from uint64, maxCount, maxBytes int, fn func([]Update) error) error {
-	rows, err := s.r.QueryContext(ctx, `SELECT seq, epoch, author, payload, sig FROM updates
-		WHERE space_id = ? AND doc_id = ? AND seq > ? ORDER BY seq`, spaceID, docID, from)
+	return s.streamRange(ctx, spaceID, docID, from, ^uint64(0)>>1, maxCount, maxBytes, fn)
+}
+
+// UpdateRange calls fn with ascending batches of the retained updates with from < seq ≤ to
+// (the update log, for point-in-time history), including when each was stored.
+func (s *Store) UpdateRange(ctx context.Context, spaceID, docID string, from, to uint64, maxCount, maxBytes int, fn func([]Update) error) error {
+	return s.streamRange(ctx, spaceID, docID, from, to, maxCount, maxBytes, fn)
+}
+
+func (s *Store) streamRange(ctx context.Context, spaceID, docID string, from, to uint64, maxCount, maxBytes int, fn func([]Update) error) error {
+	rows, err := s.r.QueryContext(ctx, `SELECT seq, epoch, author, payload, sig, created_at FROM updates
+		WHERE space_id = ? AND doc_id = ? AND seq > ? AND seq <= ? ORDER BY seq`, spaceID, docID, from, to)
 	if err != nil {
 		return err
 	}
@@ -350,7 +369,7 @@ func (s *Store) StreamUpdates(ctx context.Context, spaceID, docID string, from u
 	size := 0
 	for rows.Next() {
 		var u Update
-		if err := rows.Scan(&u.Seq, &u.Epoch, &u.Author, &u.Payload, &u.Sig); err != nil {
+		if err := rows.Scan(&u.Seq, &u.Epoch, &u.Author, &u.Payload, &u.Sig, &u.CreatedAt); err != nil {
 			return err
 		}
 		if len(batch) > 0 && (len(batch) >= maxCount || size+len(u.Payload) > maxBytes) {

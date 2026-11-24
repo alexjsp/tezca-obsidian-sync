@@ -6,6 +6,7 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func open(t *testing.T) *Store {
@@ -209,10 +210,22 @@ func TestSpacesAndDocs(t *testing.T) {
 	if d.SnapshotSeq != 4 || d.LatestSeq != 10 || d.UpdatesSinceSnapshot != 6 || d.BytesSinceSnapshot != 60 {
 		t.Fatalf("after snapshot: %+v", d)
 	}
+	// The update log is kept for the history window (point-in-time restore), with arrival times.
 	var first uint64
-	s.StreamUpdates(ctx, sp, "index", 0, 100, 1<<20, func(b []Update) error { first = b[0].Seq; return nil })
-	if first != 5 {
-		t.Fatalf("prune: first remaining seq %d", first)
+	var created int64
+	s.StreamUpdates(ctx, sp, "index", 0, 100, 1<<20, func(b []Update) error { first, created = b[0].Seq, b[0].CreatedAt; return nil })
+	if first != 1 || created == 0 {
+		t.Fatalf("log kept: first remaining seq %d, created %d", first, created)
+	}
+	var ranged []uint64
+	s.UpdateRange(ctx, sp, "index", 2, 4, 100, 1<<20, func(b []Update) error {
+		for _, u := range b {
+			ranged = append(ranged, u.Seq)
+		}
+		return nil
+	})
+	if !reflect.DeepEqual(ranged, []uint64{3, 4}) {
+		t.Fatalf("range: %v", ranged)
 	}
 	for _, b := range []uint64{6, 8, 10} {
 		if err := snap(b); err != nil {
@@ -231,6 +244,19 @@ func TestSpacesAndDocs(t *testing.T) {
 	heads, err := s.DocHeads(ctx, sp)
 	if err != nil || len(heads) != 1 || heads[0].LatestSeq != 10 || heads[0].SnapshotSeq != 10 || heads[0].UpdatesSinceSnapshot != 0 {
 		t.Fatalf("heads: %+v %v", heads, err)
+	}
+	// Past the history window, updates covered by the newest snapshot are dropped.
+	later := time.Now().Add(31 * 24 * time.Hour).UnixMilli()
+	if _, err := s.AppendUpdate(ctx, sp, "index", Update{Author: pk(1), Payload: []byte("u"), Sig: []byte("s")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.PutSnapshot(ctx, sp, "index", Snapshot{BaseSeq: 11, Author: pk(1), Payload: []byte("snap"), Sig: []byte("s")}, later); err != nil {
+		t.Fatal(err)
+	}
+	left := 0
+	s.StreamUpdates(ctx, sp, "index", 0, 100, 1<<20, func(b []Update) error { left += len(b); return nil })
+	if left != 0 {
+		t.Fatalf("old covered updates kept: %d", left)
 	}
 
 	// Members.

@@ -148,6 +148,12 @@ CREATE TABLE IF NOT EXISTS share_invite_keys(token TEXT NOT NULL, epoch INT NOT 
 	`
 CREATE INDEX IF NOT EXISTS blobs_by_creator ON blobs(created_by);
 `,
+	// v5: updates are kept for the history window (not dropped at each snapshot), so they record
+	// when they arrived. Existing rows count from the upgrade.
+	`
+ALTER TABLE updates ADD COLUMN created_at INT NOT NULL DEFAULT 0;
+UPDATE updates SET created_at = CAST(strftime('%s','now') AS INTEGER) * 1000;
+`,
 }
 
 func migrate(db *sql.DB) error {

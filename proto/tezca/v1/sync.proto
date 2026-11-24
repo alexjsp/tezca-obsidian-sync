@@ -78,6 +78,7 @@ message Update {
   bytes author = 3;   // author sign_pk
   bytes payload = 4;  // nonce(24) ‖ xchacha20poly1305 ciphertext
   bytes sig = 5;      // ed25519 over sigInput("update", …)
+  int64 created_at = 6; // when the server stored it (unix ms); set by the server, ignored on push
 }
 
 // ───────────────────────── client → server ─────────────────────────
@@ -98,6 +99,7 @@ message ClientFrame {
     Ping ping = 12;
     ListVersions list_versions = 13;
     GetVersion get_version = 14;
+    GetUpdates get_updates = 15;
   }
 }
 
@@ -184,6 +186,7 @@ message ServerFrame {
     VersionList version_list = 14;
     VersionData version_data = 15;
     SpaceChanged space_changed = 16;
+    UpdateRange update_range = 17;
   }
 }
 
@@ -324,4 +327,23 @@ message VersionData {
 // new list means the caller was removed.
 message SpaceChanged {
   string space_id = 1;
+}
+
+// Point-in-time history: the retained update log of a doc (servers advertising the
+// "update-log" feature in /api/info keep it for the history window). Answered with one
+// UpdateRange holding a capped batch; done = false means ask again from its last seq.
+message GetUpdates {
+  uint32 rid = 1;
+  string space_id = 2;
+  string doc_id = 3;
+  uint64 from_seq = 4; // exclusive
+  uint64 to_seq = 5;   // inclusive; 0 = the latest
+}
+
+message UpdateRange {
+  uint32 rid = 1;
+  string space_id = 2;
+  string doc_id = 3;
+  repeated Update updates = 4; // ascending seq, with created_at
+  bool done = 5;
 }

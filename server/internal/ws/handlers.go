@@ -95,6 +95,11 @@ func (c *conn) dispatch(ctx context.Context, f *pb.ClientFrame) {
 		if err := c.getVersion(ctx, v); err != nil {
 			c.fail(v.Rid, v.SpaceId, v.DocId, err)
 		}
+	case *pb.ClientFrame_GetUpdates:
+		v := m.GetUpdates
+		if err := c.getUpdates(ctx, v); err != nil {
+			c.fail(v.Rid, v.SpaceId, v.DocId, err)
+		}
 	case *pb.ClientFrame_Awareness:
 		a := m.Awareness
 		if err := c.awareness(ctx, a); err != nil {
@@ -386,6 +391,39 @@ func (c *conn) getVersion(ctx context.Context, m *pb.GetVersion) error {
 	c.send(&pb.ServerFrame{Msg: &pb.ServerFrame_VersionData{VersionData: &pb.VersionData{
 		Rid: m.Rid, SpaceId: m.SpaceId, DocId: m.DocId, Info: info, Payload: sn.Payload, Sig: sn.Sig,
 	}}})
+	return nil
+}
+
+// Caps on one UpdateRange answer (the client asks again from the last seq).
+const (
+	RangeMaxUpdates = 2000
+	RangeMaxBytes   = 4 << 20
+)
+
+func (c *conn) getUpdates(ctx context.Context, m *pb.GetUpdates) error {
+	if err := c.checkRead(ctx, m.SpaceId, m.DocId); err != nil {
+		return err
+	}
+	to := m.ToSeq
+	if to == 0 {
+		to = ^uint64(0) >> 1
+	}
+	out := &pb.UpdateRange{Rid: m.Rid, SpaceId: m.SpaceId, DocId: m.DocId, Done: true}
+	errFull := errors.New("full")
+	err := c.h.cfg.Store.UpdateRange(ctx, m.SpaceId, m.DocId, m.FromSeq, to, RangeMaxUpdates, RangeMaxBytes, func(batch []store.Update) error {
+		if len(out.Updates) > 0 {
+			out.Done = false
+			return errFull
+		}
+		for _, u := range batch {
+			out.Updates = append(out.Updates, &pb.Update{Seq: u.Seq, Epoch: u.Epoch, Author: u.Author, Payload: u.Payload, Sig: u.Sig, CreatedAt: u.CreatedAt})
+		}
+		return nil
+	})
+	if err != nil && !errors.Is(err, errFull) {
+		return err
+	}
+	c.send(&pb.ServerFrame{Msg: &pb.ServerFrame_UpdateRange{UpdateRange: out}})
 	return nil
 }
 

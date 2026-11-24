@@ -528,9 +528,10 @@ type Update struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Seq           uint64                 `protobuf:"varint,1,opt,name=seq,proto3" json:"seq,omitempty"`
 	Epoch         uint32                 `protobuf:"varint,2,opt,name=epoch,proto3" json:"epoch,omitempty"`
-	Author        []byte                 `protobuf:"bytes,3,opt,name=author,proto3" json:"author,omitempty"`   // author sign_pk
-	Payload       []byte                 `protobuf:"bytes,4,opt,name=payload,proto3" json:"payload,omitempty"` // nonce(24) ‖ xchacha20poly1305 ciphertext
-	Sig           []byte                 `protobuf:"bytes,5,opt,name=sig,proto3" json:"sig,omitempty"`         // ed25519 over sigInput("update", …)
+	Author        []byte                 `protobuf:"bytes,3,opt,name=author,proto3" json:"author,omitempty"`                         // author sign_pk
+	Payload       []byte                 `protobuf:"bytes,4,opt,name=payload,proto3" json:"payload,omitempty"`                       // nonce(24) ‖ xchacha20poly1305 ciphertext
+	Sig           []byte                 `protobuf:"bytes,5,opt,name=sig,proto3" json:"sig,omitempty"`                               // ed25519 over sigInput("update", …)
+	CreatedAt     int64                  `protobuf:"varint,6,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"` // when the server stored it (unix ms); set by the server, ignored on push
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -600,6 +601,13 @@ func (x *Update) GetSig() []byte {
 	return nil
 }
 
+func (x *Update) GetCreatedAt() int64 {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return 0
+}
+
 type ClientFrame struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Msg:
@@ -618,6 +626,7 @@ type ClientFrame struct {
 	//	*ClientFrame_Ping
 	//	*ClientFrame_ListVersions
 	//	*ClientFrame_GetVersion
+	//	*ClientFrame_GetUpdates
 	Msg           isClientFrame_Msg `protobuf_oneof:"msg"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -786,6 +795,15 @@ func (x *ClientFrame) GetGetVersion() *GetVersion {
 	return nil
 }
 
+func (x *ClientFrame) GetGetUpdates() *GetUpdates {
+	if x != nil {
+		if x, ok := x.Msg.(*ClientFrame_GetUpdates); ok {
+			return x.GetUpdates
+		}
+	}
+	return nil
+}
+
 type isClientFrame_Msg interface {
 	isClientFrame_Msg()
 }
@@ -846,6 +864,10 @@ type ClientFrame_GetVersion struct {
 	GetVersion *GetVersion `protobuf:"bytes,14,opt,name=get_version,json=getVersion,proto3,oneof"`
 }
 
+type ClientFrame_GetUpdates struct {
+	GetUpdates *GetUpdates `protobuf:"bytes,15,opt,name=get_updates,json=getUpdates,proto3,oneof"`
+}
+
 func (*ClientFrame_Hello) isClientFrame_Msg() {}
 
 func (*ClientFrame_Auth) isClientFrame_Msg() {}
@@ -873,6 +895,8 @@ func (*ClientFrame_Ping) isClientFrame_Msg() {}
 func (*ClientFrame_ListVersions) isClientFrame_Msg() {}
 
 func (*ClientFrame_GetVersion) isClientFrame_Msg() {}
+
+func (*ClientFrame_GetUpdates) isClientFrame_Msg() {}
 
 type Hello struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
@@ -1614,6 +1638,7 @@ type ServerFrame struct {
 	//	*ServerFrame_VersionList
 	//	*ServerFrame_VersionData
 	//	*ServerFrame_SpaceChanged
+	//	*ServerFrame_UpdateRange
 	Msg           isServerFrame_Msg `protobuf_oneof:"msg"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1800,6 +1825,15 @@ func (x *ServerFrame) GetSpaceChanged() *SpaceChanged {
 	return nil
 }
 
+func (x *ServerFrame) GetUpdateRange() *UpdateRange {
+	if x != nil {
+		if x, ok := x.Msg.(*ServerFrame_UpdateRange); ok {
+			return x.UpdateRange
+		}
+	}
+	return nil
+}
+
 type isServerFrame_Msg interface {
 	isServerFrame_Msg()
 }
@@ -1868,6 +1902,10 @@ type ServerFrame_SpaceChanged struct {
 	SpaceChanged *SpaceChanged `protobuf:"bytes,16,opt,name=space_changed,json=spaceChanged,proto3,oneof"`
 }
 
+type ServerFrame_UpdateRange struct {
+	UpdateRange *UpdateRange `protobuf:"bytes,17,opt,name=update_range,json=updateRange,proto3,oneof"`
+}
+
 func (*ServerFrame_Challenge) isServerFrame_Msg() {}
 
 func (*ServerFrame_AuthOk) isServerFrame_Msg() {}
@@ -1899,6 +1937,8 @@ func (*ServerFrame_VersionList) isServerFrame_Msg() {}
 func (*ServerFrame_VersionData) isServerFrame_Msg() {}
 
 func (*ServerFrame_SpaceChanged) isServerFrame_Msg() {}
+
+func (*ServerFrame_UpdateRange) isServerFrame_Msg() {}
 
 type Challenge struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
@@ -3175,6 +3215,161 @@ func (x *SpaceChanged) GetSpaceId() string {
 	return ""
 }
 
+// Point-in-time history: the retained update log of a doc (servers advertising the
+// "update-log" feature in /api/info keep it for the history window). Answered with one
+// UpdateRange holding a capped batch; done = false means ask again from its last seq.
+type GetUpdates struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Rid           uint32                 `protobuf:"varint,1,opt,name=rid,proto3" json:"rid,omitempty"`
+	SpaceId       string                 `protobuf:"bytes,2,opt,name=space_id,json=spaceId,proto3" json:"space_id,omitempty"`
+	DocId         string                 `protobuf:"bytes,3,opt,name=doc_id,json=docId,proto3" json:"doc_id,omitempty"`
+	FromSeq       uint64                 `protobuf:"varint,4,opt,name=from_seq,json=fromSeq,proto3" json:"from_seq,omitempty"` // exclusive
+	ToSeq         uint64                 `protobuf:"varint,5,opt,name=to_seq,json=toSeq,proto3" json:"to_seq,omitempty"`       // inclusive; 0 = the latest
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetUpdates) Reset() {
+	*x = GetUpdates{}
+	mi := &file_tezca_v1_sync_proto_msgTypes[38]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetUpdates) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetUpdates) ProtoMessage() {}
+
+func (x *GetUpdates) ProtoReflect() protoreflect.Message {
+	mi := &file_tezca_v1_sync_proto_msgTypes[38]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetUpdates.ProtoReflect.Descriptor instead.
+func (*GetUpdates) Descriptor() ([]byte, []int) {
+	return file_tezca_v1_sync_proto_rawDescGZIP(), []int{38}
+}
+
+func (x *GetUpdates) GetRid() uint32 {
+	if x != nil {
+		return x.Rid
+	}
+	return 0
+}
+
+func (x *GetUpdates) GetSpaceId() string {
+	if x != nil {
+		return x.SpaceId
+	}
+	return ""
+}
+
+func (x *GetUpdates) GetDocId() string {
+	if x != nil {
+		return x.DocId
+	}
+	return ""
+}
+
+func (x *GetUpdates) GetFromSeq() uint64 {
+	if x != nil {
+		return x.FromSeq
+	}
+	return 0
+}
+
+func (x *GetUpdates) GetToSeq() uint64 {
+	if x != nil {
+		return x.ToSeq
+	}
+	return 0
+}
+
+type UpdateRange struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Rid           uint32                 `protobuf:"varint,1,opt,name=rid,proto3" json:"rid,omitempty"`
+	SpaceId       string                 `protobuf:"bytes,2,opt,name=space_id,json=spaceId,proto3" json:"space_id,omitempty"`
+	DocId         string                 `protobuf:"bytes,3,opt,name=doc_id,json=docId,proto3" json:"doc_id,omitempty"`
+	Updates       []*Update              `protobuf:"bytes,4,rep,name=updates,proto3" json:"updates,omitempty"` // ascending seq, with created_at
+	Done          bool                   `protobuf:"varint,5,opt,name=done,proto3" json:"done,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateRange) Reset() {
+	*x = UpdateRange{}
+	mi := &file_tezca_v1_sync_proto_msgTypes[39]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateRange) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateRange) ProtoMessage() {}
+
+func (x *UpdateRange) ProtoReflect() protoreflect.Message {
+	mi := &file_tezca_v1_sync_proto_msgTypes[39]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateRange.ProtoReflect.Descriptor instead.
+func (*UpdateRange) Descriptor() ([]byte, []int) {
+	return file_tezca_v1_sync_proto_rawDescGZIP(), []int{39}
+}
+
+func (x *UpdateRange) GetRid() uint32 {
+	if x != nil {
+		return x.Rid
+	}
+	return 0
+}
+
+func (x *UpdateRange) GetSpaceId() string {
+	if x != nil {
+		return x.SpaceId
+	}
+	return ""
+}
+
+func (x *UpdateRange) GetDocId() string {
+	if x != nil {
+		return x.DocId
+	}
+	return ""
+}
+
+func (x *UpdateRange) GetUpdates() []*Update {
+	if x != nil {
+		return x.Updates
+	}
+	return nil
+}
+
+func (x *UpdateRange) GetDone() bool {
+	if x != nil {
+		return x.Done
+	}
+	return false
+}
+
 var File_tezca_v1_sync_proto protoreflect.FileDescriptor
 
 const file_tezca_v1_sync_proto_rawDesc = "" +
@@ -3201,13 +3396,15 @@ const file_tezca_v1_sync_proto_rawDesc = "" +
 	"\x06doc_id\x18\x01 \x01(\tR\x05docId\x12\x1d\n" +
 	"\n" +
 	"latest_seq\x18\x02 \x01(\x04R\tlatestSeq\x12!\n" +
-	"\fsnapshot_seq\x18\x03 \x01(\x04R\vsnapshotSeq\"t\n" +
+	"\fsnapshot_seq\x18\x03 \x01(\x04R\vsnapshotSeq\"\x93\x01\n" +
 	"\x06Update\x12\x10\n" +
 	"\x03seq\x18\x01 \x01(\x04R\x03seq\x12\x14\n" +
 	"\x05epoch\x18\x02 \x01(\rR\x05epoch\x12\x16\n" +
 	"\x06author\x18\x03 \x01(\fR\x06author\x12\x18\n" +
 	"\apayload\x18\x04 \x01(\fR\apayload\x12\x10\n" +
-	"\x03sig\x18\x05 \x01(\fR\x03sig\"\xa2\x06\n" +
+	"\x03sig\x18\x05 \x01(\fR\x03sig\x12\x1d\n" +
+	"\n" +
+	"created_at\x18\x06 \x01(\x03R\tcreatedAt\"\xdb\x06\n" +
 	"\vClientFrame\x12'\n" +
 	"\x05hello\x18\x01 \x01(\v2\x0f.tezca.v1.HelloH\x00R\x05hello\x12$\n" +
 	"\x04auth\x18\x02 \x01(\v2\x0e.tezca.v1.AuthH\x00R\x04auth\x127\n" +
@@ -3226,7 +3423,9 @@ const file_tezca_v1_sync_proto_rawDesc = "" +
 	"\x04ping\x18\f \x01(\v2\x0e.tezca.v1.PingH\x00R\x04ping\x12=\n" +
 	"\rlist_versions\x18\r \x01(\v2\x16.tezca.v1.ListVersionsH\x00R\flistVersions\x127\n" +
 	"\vget_version\x18\x0e \x01(\v2\x14.tezca.v1.GetVersionH\x00R\n" +
-	"getVersionB\x05\n" +
+	"getVersion\x127\n" +
+	"\vget_updates\x18\x0f \x01(\v2\x14.tezca.v1.GetUpdatesH\x00R\n" +
+	"getUpdatesB\x05\n" +
 	"\x03msg\"\x8f\x01\n" +
 	"\x05Hello\x12\x17\n" +
 	"\asign_pk\x18\x01 \x01(\fR\x06signPk\x12\x1b\n" +
@@ -3278,7 +3477,7 @@ const file_tezca_v1_sync_proto_rawDesc = "" +
 	"\x05epoch\x18\x03 \x01(\rR\x05epoch\x12\x18\n" +
 	"\apayload\x18\x04 \x01(\fR\apayload\"\x14\n" +
 	"\x04Ping\x12\f\n" +
-	"\x01t\x18\x01 \x01(\x04R\x01t\"\xcf\x06\n" +
+	"\x01t\x18\x01 \x01(\x04R\x01t\"\x8b\a\n" +
 	"\vServerFrame\x123\n" +
 	"\tchallenge\x18\x01 \x01(\v2\x13.tezca.v1.ChallengeH\x00R\tchallenge\x12+\n" +
 	"\aauth_ok\x18\x02 \x01(\v2\x10.tezca.v1.AuthOkH\x00R\x06authOk\x124\n" +
@@ -3297,7 +3496,8 @@ const file_tezca_v1_sync_proto_rawDesc = "" +
 	"\x04pong\x18\r \x01(\v2\x0e.tezca.v1.PongH\x00R\x04pong\x12:\n" +
 	"\fversion_list\x18\x0e \x01(\v2\x15.tezca.v1.VersionListH\x00R\vversionList\x12:\n" +
 	"\fversion_data\x18\x0f \x01(\v2\x15.tezca.v1.VersionDataH\x00R\vversionData\x12=\n" +
-	"\rspace_changed\x18\x10 \x01(\v2\x16.tezca.v1.SpaceChangedH\x00R\fspaceChangedB\x05\n" +
+	"\rspace_changed\x18\x10 \x01(\v2\x16.tezca.v1.SpaceChangedH\x00R\fspaceChanged\x12:\n" +
+	"\fupdate_range\x18\x11 \x01(\v2\x15.tezca.v1.UpdateRangeH\x00R\vupdateRangeB\x05\n" +
 	"\x03msg\"i\n" +
 	"\tChallenge\x12\x14\n" +
 	"\x05nonce\x18\x01 \x01(\fR\x05nonce\x12\x1b\n" +
@@ -3394,7 +3594,20 @@ const file_tezca_v1_sync_proto_rawDesc = "" +
 	"\apayload\x18\x05 \x01(\fR\apayload\x12\x10\n" +
 	"\x03sig\x18\x06 \x01(\fR\x03sig\")\n" +
 	"\fSpaceChanged\x12\x19\n" +
-	"\bspace_id\x18\x01 \x01(\tR\aspaceId*j\n" +
+	"\bspace_id\x18\x01 \x01(\tR\aspaceId\"\x82\x01\n" +
+	"\n" +
+	"GetUpdates\x12\x10\n" +
+	"\x03rid\x18\x01 \x01(\rR\x03rid\x12\x19\n" +
+	"\bspace_id\x18\x02 \x01(\tR\aspaceId\x12\x15\n" +
+	"\x06doc_id\x18\x03 \x01(\tR\x05docId\x12\x19\n" +
+	"\bfrom_seq\x18\x04 \x01(\x04R\afromSeq\x12\x15\n" +
+	"\x06to_seq\x18\x05 \x01(\x04R\x05toSeq\"\x91\x01\n" +
+	"\vUpdateRange\x12\x10\n" +
+	"\x03rid\x18\x01 \x01(\rR\x03rid\x12\x19\n" +
+	"\bspace_id\x18\x02 \x01(\tR\aspaceId\x12\x15\n" +
+	"\x06doc_id\x18\x03 \x01(\tR\x05docId\x12*\n" +
+	"\aupdates\x18\x04 \x03(\v2\x10.tezca.v1.UpdateR\aupdates\x12\x12\n" +
+	"\x04done\x18\x05 \x01(\bR\x04done*j\n" +
 	"\tSpaceKind\x12\x1a\n" +
 	"\x16SPACE_KIND_UNSPECIFIED\x10\x00\x12\x13\n" +
 	"\x0fSPACE_KIND_ROOT\x10\x01\x12\x14\n" +
@@ -3435,7 +3648,7 @@ func file_tezca_v1_sync_proto_rawDescGZIP() []byte {
 }
 
 var file_tezca_v1_sync_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-var file_tezca_v1_sync_proto_msgTypes = make([]protoimpl.MessageInfo, 38)
+var file_tezca_v1_sync_proto_msgTypes = make([]protoimpl.MessageInfo, 40)
 var file_tezca_v1_sync_proto_goTypes = []any{
 	(SpaceKind)(0),           // 0: tezca.v1.SpaceKind
 	(SpaceRole)(0),           // 1: tezca.v1.SpaceRole
@@ -3479,6 +3692,8 @@ var file_tezca_v1_sync_proto_goTypes = []any{
 	(*GetVersion)(nil),       // 39: tezca.v1.GetVersion
 	(*VersionData)(nil),      // 40: tezca.v1.VersionData
 	(*SpaceChanged)(nil),     // 41: tezca.v1.SpaceChanged
+	(*GetUpdates)(nil),       // 42: tezca.v1.GetUpdates
+	(*UpdateRange)(nil),      // 43: tezca.v1.UpdateRange
 }
 var file_tezca_v1_sync_proto_depIdxs = []int32{
 	0,  // 0: tezca.v1.SpaceInfo.kind:type_name -> tezca.v1.SpaceKind
@@ -3500,36 +3715,39 @@ var file_tezca_v1_sync_proto_depIdxs = []int32{
 	21, // 16: tezca.v1.ClientFrame.ping:type_name -> tezca.v1.Ping
 	36, // 17: tezca.v1.ClientFrame.list_versions:type_name -> tezca.v1.ListVersions
 	39, // 18: tezca.v1.ClientFrame.get_version:type_name -> tezca.v1.GetVersion
-	0,  // 19: tezca.v1.CreateSpace.kind:type_name -> tezca.v1.SpaceKind
-	23, // 20: tezca.v1.ServerFrame.challenge:type_name -> tezca.v1.Challenge
-	24, // 21: tezca.v1.ServerFrame.auth_ok:type_name -> tezca.v1.AuthOk
-	25, // 22: tezca.v1.ServerFrame.space_list:type_name -> tezca.v1.SpaceList
-	26, // 23: tezca.v1.ServerFrame.space_created:type_name -> tezca.v1.SpaceCreated
-	27, // 24: tezca.v1.ServerFrame.doc_heads:type_name -> tezca.v1.DocHeads
-	28, // 25: tezca.v1.ServerFrame.snapshot:type_name -> tezca.v1.Snapshot
-	29, // 26: tezca.v1.ServerFrame.updates:type_name -> tezca.v1.Updates
-	30, // 27: tezca.v1.ServerFrame.sync_done:type_name -> tezca.v1.SyncDone
-	31, // 28: tezca.v1.ServerFrame.ack:type_name -> tezca.v1.Ack
-	32, // 29: tezca.v1.ServerFrame.snapshot_ack:type_name -> tezca.v1.SnapshotAck
-	33, // 30: tezca.v1.ServerFrame.awareness:type_name -> tezca.v1.AwarenessOut
-	34, // 31: tezca.v1.ServerFrame.error:type_name -> tezca.v1.Error
-	35, // 32: tezca.v1.ServerFrame.pong:type_name -> tezca.v1.Pong
-	38, // 33: tezca.v1.ServerFrame.version_list:type_name -> tezca.v1.VersionList
-	40, // 34: tezca.v1.ServerFrame.version_data:type_name -> tezca.v1.VersionData
-	41, // 35: tezca.v1.ServerFrame.space_changed:type_name -> tezca.v1.SpaceChanged
-	2,  // 36: tezca.v1.AuthOk.role:type_name -> tezca.v1.HostRole
-	5,  // 37: tezca.v1.SpaceList.spaces:type_name -> tezca.v1.SpaceInfo
-	5,  // 38: tezca.v1.SpaceCreated.space:type_name -> tezca.v1.SpaceInfo
-	7,  // 39: tezca.v1.DocHeads.heads:type_name -> tezca.v1.DocHead
-	8,  // 40: tezca.v1.Updates.updates:type_name -> tezca.v1.Update
-	3,  // 41: tezca.v1.Error.code:type_name -> tezca.v1.ErrorCode
-	37, // 42: tezca.v1.VersionList.versions:type_name -> tezca.v1.VersionInfo
-	37, // 43: tezca.v1.VersionData.info:type_name -> tezca.v1.VersionInfo
-	44, // [44:44] is the sub-list for method output_type
-	44, // [44:44] is the sub-list for method input_type
-	44, // [44:44] is the sub-list for extension type_name
-	44, // [44:44] is the sub-list for extension extendee
-	0,  // [0:44] is the sub-list for field type_name
+	42, // 19: tezca.v1.ClientFrame.get_updates:type_name -> tezca.v1.GetUpdates
+	0,  // 20: tezca.v1.CreateSpace.kind:type_name -> tezca.v1.SpaceKind
+	23, // 21: tezca.v1.ServerFrame.challenge:type_name -> tezca.v1.Challenge
+	24, // 22: tezca.v1.ServerFrame.auth_ok:type_name -> tezca.v1.AuthOk
+	25, // 23: tezca.v1.ServerFrame.space_list:type_name -> tezca.v1.SpaceList
+	26, // 24: tezca.v1.ServerFrame.space_created:type_name -> tezca.v1.SpaceCreated
+	27, // 25: tezca.v1.ServerFrame.doc_heads:type_name -> tezca.v1.DocHeads
+	28, // 26: tezca.v1.ServerFrame.snapshot:type_name -> tezca.v1.Snapshot
+	29, // 27: tezca.v1.ServerFrame.updates:type_name -> tezca.v1.Updates
+	30, // 28: tezca.v1.ServerFrame.sync_done:type_name -> tezca.v1.SyncDone
+	31, // 29: tezca.v1.ServerFrame.ack:type_name -> tezca.v1.Ack
+	32, // 30: tezca.v1.ServerFrame.snapshot_ack:type_name -> tezca.v1.SnapshotAck
+	33, // 31: tezca.v1.ServerFrame.awareness:type_name -> tezca.v1.AwarenessOut
+	34, // 32: tezca.v1.ServerFrame.error:type_name -> tezca.v1.Error
+	35, // 33: tezca.v1.ServerFrame.pong:type_name -> tezca.v1.Pong
+	38, // 34: tezca.v1.ServerFrame.version_list:type_name -> tezca.v1.VersionList
+	40, // 35: tezca.v1.ServerFrame.version_data:type_name -> tezca.v1.VersionData
+	41, // 36: tezca.v1.ServerFrame.space_changed:type_name -> tezca.v1.SpaceChanged
+	43, // 37: tezca.v1.ServerFrame.update_range:type_name -> tezca.v1.UpdateRange
+	2,  // 38: tezca.v1.AuthOk.role:type_name -> tezca.v1.HostRole
+	5,  // 39: tezca.v1.SpaceList.spaces:type_name -> tezca.v1.SpaceInfo
+	5,  // 40: tezca.v1.SpaceCreated.space:type_name -> tezca.v1.SpaceInfo
+	7,  // 41: tezca.v1.DocHeads.heads:type_name -> tezca.v1.DocHead
+	8,  // 42: tezca.v1.Updates.updates:type_name -> tezca.v1.Update
+	3,  // 43: tezca.v1.Error.code:type_name -> tezca.v1.ErrorCode
+	37, // 44: tezca.v1.VersionList.versions:type_name -> tezca.v1.VersionInfo
+	37, // 45: tezca.v1.VersionData.info:type_name -> tezca.v1.VersionInfo
+	8,  // 46: tezca.v1.UpdateRange.updates:type_name -> tezca.v1.Update
+	47, // [47:47] is the sub-list for method output_type
+	47, // [47:47] is the sub-list for method input_type
+	47, // [47:47] is the sub-list for extension type_name
+	47, // [47:47] is the sub-list for extension extendee
+	0,  // [0:47] is the sub-list for field type_name
 }
 
 func init() { file_tezca_v1_sync_proto_init() }
@@ -3552,6 +3770,7 @@ func file_tezca_v1_sync_proto_init() {
 		(*ClientFrame_Ping)(nil),
 		(*ClientFrame_ListVersions)(nil),
 		(*ClientFrame_GetVersion)(nil),
+		(*ClientFrame_GetUpdates)(nil),
 	}
 	file_tezca_v1_sync_proto_msgTypes[18].OneofWrappers = []any{
 		(*ServerFrame_Challenge)(nil),
@@ -3570,6 +3789,7 @@ func file_tezca_v1_sync_proto_init() {
 		(*ServerFrame_VersionList)(nil),
 		(*ServerFrame_VersionData)(nil),
 		(*ServerFrame_SpaceChanged)(nil),
+		(*ServerFrame_UpdateRange)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -3577,7 +3797,7 @@ func file_tezca_v1_sync_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_tezca_v1_sync_proto_rawDesc), len(file_tezca_v1_sync_proto_rawDesc)),
 			NumEnums:      4,
-			NumMessages:   38,
+			NumMessages:   40,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

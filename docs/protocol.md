@@ -194,8 +194,8 @@ lock, sends the backlog, and registers the subscriber atomically.
 - Same role, epoch and signature checks, with `≤ 16 MiB`.
 - `1 ≤ base_seq ≤ latest_seq`, and `base_seq` greater than the current snapshot's `base_seq`.
   Otherwise the server returns `CONFLICT`.
-- The server stores the snapshot (with `created_at` = now), prunes stored updates with
-  `seq ≤ base_seq`, and applies snapshot retention (below). It replies
+- The server stores the snapshot (with `created_at` = now) and applies retention (below): it keeps
+  stored updates with `seq ≤ base_seq` for the history window rather than dropping them. It replies
   `SnapshotAck{…, created_at}` and sends `DocHeads{full:false}` to space subscribers.
 - `SyncDone.snapshot_created_at` is the latest snapshot's `created_at` (0 if none).
 - Clients should snapshot when `SyncDone.updates_since_snapshot > 500` or
@@ -209,6 +209,17 @@ Retained snapshots are a doc's **versions**. Retention runs after every `PutSnap
 - keep the newest snapshot in each clock hour for the last `TEZCA_HISTORY_HOURS` (default 24) hours;
 - keep the newest snapshot in each UTC day for the last `TEZCA_HISTORY_DAYS` (default 30) days;
 - delete the rest.
+
+The **update log** is kept for the same window: at each `PutSnapshot` the server deletes only updates
+with `seq ≤ base_seq` stored more than `TEZCA_HISTORY_DAYS` ago. Each stored update records when it
+arrived (`Update.created_at`, unix ms, set by the server). Servers that keep the log advertise
+`"update-log"` in `/api/info` `features`, and answer
+`GetUpdates{rid, space_id, doc_id, from_seq (exclusive), to_seq (inclusive, 0 = latest)}` with one
+`UpdateRange{rid, …, updates, done}` holding a capped batch (≤ 2000 updates / 4 MiB); `done = false`
+means ask again from the last seq. Clients rebuild any point in the window themselves (an earlier
+snapshot, or the doc's start, plus the updates after it) and offer restore points at the end of each
+burst of edits and just before any large deletion. Clients must not send `GetUpdates` to servers
+without the feature (older servers answer unknown frames with an error that carries no `rid`).
 
 Clients take a **version snapshot** (an ordinary `PutSnapshot`) when they have edited a doc locally,
 all their updates are acked, and the latest snapshot is older than an hour; they wait for the doc to

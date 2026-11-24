@@ -18,6 +18,7 @@
 .tezca-history-item { padding: 6px 8px; border-radius: var(--radius-s); cursor: pointer; font-size: var(--font-ui-small); }
 .tezca-history-item:hover { background: var(--background-modifier-hover); }
 .tezca-history-item.is-active { background: var(--background-modifier-active-hover); }
+.tezca-history-warn .tezca-history-meta { color: var(--text-warning); }
 .tezca-history-meta { color: var(--text-muted); font-size: var(--font-ui-smaller); }
 .tezca-history-view { flex: 1; min-width: 0; overflow-y: auto; max-height: 60vh; }
 .tezca-diff { white-space: pre-wrap; font-family: var(--font-monospace); font-size: var(--font-ui-smaller); user-select: text; }

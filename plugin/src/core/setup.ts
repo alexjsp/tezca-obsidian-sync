@@ -80,6 +80,8 @@ export interface ServerInfo {
 	name?: string;
 	/** Largest blob plaintext the host accepts (M2+). */
 	max_blob_bytes?: number;
+	/** Optional server features, e.g. "update-log" (point-in-time history). */
+	features?: string[];
 }
 
 export class HostApi {

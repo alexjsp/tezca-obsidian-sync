@@ -61,6 +61,8 @@ export function wsUrl(host: string): string {
 
 export class HostConnection {
 	status: ConnStatus = "offline";
+	/** Optional features the host advertises in /api/info (filled in by the engine). */
+	features = new Set<string>();
 	authInfo: AuthOk | null = null;
 	readonly statusChanged = new Emitter<ConnStatus>();
 	/** Fires after every successful (re)authentication. */
@@ -242,7 +244,8 @@ export class HostConnection {
 			case "spaceList":
 			case "spaceCreated":
 			case "versionList":
-			case "versionData": {
+			case "versionData":
+			case "updateRange": {
 				const p = this.pending.get(m.value.rid);
 				if (p) {
 					this.pending.delete(m.value.rid);

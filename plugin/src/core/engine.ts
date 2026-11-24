@@ -311,6 +311,7 @@ export class SyncEngine {
 		try {
 			const info = await l.api.info();
 			if (info.max_blob_bytes) l.maxBlobBytes = info.max_blob_bytes;
+			l.conn.features = new Set(info.features ?? []);
 		} catch (e) {
 			log.debug(`could not read ${l.host} limits`, e);
 		}

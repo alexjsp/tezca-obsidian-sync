@@ -121,3 +121,12 @@ func (s *Store) GetVersion(ctx context.Context, spaceID, docID string, baseSeq u
 	}
 	return sn, err
 }
+
+// pruneUpdates drops log entries the history window no longer needs: covered by the snapshot at
+// baseSeq (the newest) and older than History.Days. Newer ones are kept so any point in the
+// window can be rebuilt from an earlier snapshot (or the doc's start) plus updates.
+func (s *Store) pruneUpdates(tx *sql.Tx, spaceID, docID string, baseSeq uint64, now int64) error {
+	cutoff := now - int64(s.history.Days)*24*3600*1000
+	_, err := tx.Exec(`DELETE FROM updates WHERE space_id = ? AND doc_id = ? AND seq <= ? AND created_at < ?`, spaceID, docID, baseSeq, cutoff)
+	return err
+}

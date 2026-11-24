@@ -5,12 +5,12 @@ import type { BlobRef } from "../core/blobs";
 import {
 	blobVersions,
 	deletedFiles,
-	listNoteVersions,
-	noteVersionText,
+	noteHistory,
+	pointText,
 	restoreBlobVersion,
 	restoreDeleted,
 	restoreNoteText,
-	type NoteVersion,
+	type HistoryPoint,
 } from "../core/history";
 import { contentModel, type DiskMirror } from "../core/mirror";
 import { log } from "../core/util";
@@ -24,6 +24,10 @@ function when(ms: number): string {
 	const mins = Math.round((Date.now() - ms) / 60000);
 	const rel = mins < 1 ? "just now" : mins < 60 ? `${mins} min ago` : mins < 1440 ? `${Math.round(mins / 60)} h ago` : `${Math.round(mins / 1440)} d ago`;
 	return `${d.toLocaleString()} (${rel})`;
+}
+
+function chars(n: number): string {
+	return n < 1000 ? `${n} characters` : `${(n / 1000).toFixed(1)}k characters`;
 }
 
 function size(n: number): string {
@@ -73,42 +77,47 @@ export class HistoryModal extends Modal {
 		if (e.kind === "blob") return this.loadBlob(e.id, blobVersions(e));
 		this.listEl.setText("Loading…");
 		try {
-			const versions = await listNoteVersions(this.mirror.space, e.id);
+			const kind = e.kind;
+			const points = await noteHistory(this.mirror.space, e.id, kind);
 			this.listEl.empty();
-			if (!versions.length) {
-				this.listEl.setText("No saved versions yet. A version is saved about an hour after you start editing a note.");
+			if (!points.length) {
+				this.listEl.setText("No history yet. Restore points appear once a note has been edited for a while.");
 				return;
 			}
-			for (const v of versions) {
-				const item = this.listEl.createDiv({ cls: "tezca-history-item", text: when(v.createdAt) });
-				item.createDiv({ cls: "tezca-history-meta", text: size(v.size) });
+			for (const p of points) {
+				const item = this.listEl.createDiv({ cls: "tezca-history-item", text: when(p.at) });
+				const what = p.kind === "version" ? "Saved version" : p.kind === "edits" ? "After edits" : `Before a large deletion (−${chars(p.removed ?? 0)})`;
+				item.createDiv({ cls: "tezca-history-meta", text: p.kind === "version" ? what : `${what} · ${chars(p.size)}` });
+				if (p.kind === "before-deletion") item.addClass("tezca-history-warn");
 				item.onclick = () => {
 					this.listEl.findAll(".is-active").forEach((el) => el.removeClass("is-active"));
 					item.addClass("is-active");
-					void this.showNoteVersion(e.id, v);
+					void this.showPoint(e.id, p);
 				};
 			}
 		} catch (err) {
 			log.warn("history load failed", err);
-			this.listEl.setText(`Couldn't load history: ${(err as Error).message}. Versions need a connection to the host.`);
+			this.listEl.setText(`Couldn't load history: ${(err as Error).message}. History needs a connection to the host.`);
 		}
 	}
 
-	private async showNoteVersion(docId: string, v: NoteVersion) {
+	private async showPoint(docId: string, p: HistoryPoint) {
 		this.viewEl.setText("Loading…");
 		try {
 			const kind = this.entry()?.kind ?? "md";
-			const old = await noteVersionText(this.mirror.space, docId, v.baseSeq, kind);
+			const old = await pointText(this.mirror.space, docId, p, kind);
 			const doc = await this.mirror.space.acquire(docId);
 			const current = contentModel(kind).read(doc);
 			this.mirror.space.release(docId);
 			this.viewEl.empty();
 			new Setting(this.viewEl)
-				.setName(when(v.createdAt))
+				.setName(when(p.at))
 				.setDesc(old === current ? "Same as the current text." : "Restoring removes the red text and brings back the green text.")
-				.addButton((b) => b.setButtonText("Copy text").onClick(async () => {
-					new Notice((await copyText(old, this.contentEl)) ? "Copied" : "Couldn't copy");
-				}))
+				.addButton((b) =>
+					b.setButtonText("Copy text").onClick(async () => {
+						new Notice((await copyText(old, this.contentEl)) ? "Copied" : "Couldn't copy");
+					}),
+				)
 				.addButton((b) =>
 					b
 						.setButtonText("Restore this version")

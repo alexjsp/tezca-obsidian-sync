@@ -346,6 +346,8 @@ func (a *API) info(w http.ResponseWriter, r *http.Request) {
 		"claimed":          claimed,
 		"name":             a.cfg.Name,
 		"max_blob_bytes":   a.cfg.MaxBlobBytes,
+		// update-log: the update log is kept for the history window and GetUpdates is served.
+		"features": []string{"update-log"},
 	}
 	// A valid signature of a host user adds their role (M4). A missing or failing signature is
 	// not an error here: the request is answered as if unsigned.
