@@ -501,6 +501,13 @@ export class Device {
 		await this.click(menuItem);
 	}
 
+	/** Every notice shown since launch (from the captured log). */
+	async noticesSeen(): Promise<string[]> {
+		await this.toMain();
+		const log = await this.browser.execute(() => (window as unknown as { __e2eLog?: string[] }).__e2eLog ?? []);
+		return log.filter((l) => l.includes(" NOTICE ")).map((l) => l.slice(l.indexOf(" NOTICE ") + 8));
+	}
+
 	/** Notices currently showing. */
 	async notices(): Promise<string[]> {
 		await this.toMain();
