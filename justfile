@@ -40,10 +40,11 @@ release version: test
   jq --arg v {{quote(version)}} '.version = $v' plugin/manifest.json > plugin/manifest.json.tmp && mv plugin/manifest.json.tmp plugin/manifest.json
   jq --arg v {{quote(version)}} '.version = $v' plugin/package.json > plugin/package.json.tmp && mv plugin/package.json.tmp plugin/package.json
   pnpm -C plugin build
+  pnpm -C plugin build:recover
   if ! git diff --quiet; then git commit -qam "Release {{version}}"; fi
   git push origin main
   gh release create {{quote(version)}} --target main --title {{quote(version)}} --generate-notes \
-    plugin/main.js plugin/manifest.json plugin/styles.css
+    plugin/main.js plugin/manifest.json plugin/styles.css plugin/dist/tezca-recover.mjs
 
 # Drive real (sandboxed) Obsidian end-to-end; slow, run when a change needs it. `just e2e core` runs specs/*core*
 e2e filter="": build

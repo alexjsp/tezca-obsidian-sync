@@ -65,6 +65,22 @@ Right-click a folder and choose **Share folder…**, then create an invite link 
 - **Recovery key:** without it, a server backup can't be decrypted. Keep it safe, and away from the server.
 - **If something goes wrong:** open a note's **Version history** (right-click the file) to restore any point in the last 30 days, or run **Tezca Sync: Show recently deleted files** from the command palette. Before sync overwrites or removes a lot of a file, Tezca also keeps a copy in the hidden `.tezca-backup` folder of your vault for 30 days.
 
+## Recovering without Obsidian
+
+If you ever need your notes back without Obsidian or a running server, for example from a backup of the server's data folder, the standalone recovery script rebuilds everything as plain files. You need [Node.js](https://nodejs.org) 22.13 or newer, the server's data folder (`tezca.db` and `blobs/`), and your recovery key.
+
+1. Download `tezca-recover.mjs` from the [latest release](https://github.com/alexjsp/tezca-obsidian-sync/releases/latest).
+2. Stop the Tezca container (or copy its data folder somewhere first).
+3. Run:
+
+   ```sh
+   node tezca-recover.mjs --data /mnt/user/appdata/tezca --out ~/Recovered
+   ```
+
+   It asks for your recovery key, then writes each of your synced vaults, with its shared folders, as ordinary Markdown files and attachments you can open in any editor (or as a new Obsidian vault). Add `--include-deleted` to also get back recently deleted files.
+
+Everything is decrypted on your computer; nothing is sent anywhere. Plain shell tools can't do this on their own: the encryption (XChaCha20-Poly1305) and the way notes are stored (as edit histories) need the script. If your server keeps attachments in S3, copy the bucket's `blobs/` folder into the data folder first.
+
 ## Learn more
 
 - [How deployment works](deploy/README.md): HTTPS options, reverse proxies, storing attachments in S3.

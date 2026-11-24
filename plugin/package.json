@@ -7,7 +7,8 @@
     "build": "tsc --noEmit && node esbuild.config.mjs production",
     "dev": "node esbuild.config.mjs",
     "test": "vitest run",
-    "vectors": "tsx scripts/gen-vectors.ts"
+    "vectors": "tsx scripts/gen-vectors.ts",
+    "build:recover": "esbuild scripts/tezca-recover.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/tezca-recover.mjs --external:node:sqlite --banner:js=\"#!/usr/bin/env node\nimport { createRequire as __cr } from \\\"node:module\\\"; const require = __cr(import.meta.url);\" --log-level=warning"
   },
   "dependencies": {
     "@bufbuild/protobuf": "2.17.0",

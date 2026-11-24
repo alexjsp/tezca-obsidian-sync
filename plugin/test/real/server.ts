@@ -44,6 +44,8 @@ export const NodeWS = class extends WebSocket {
 
 export interface RealServer {
 	url: string;
+	/** The server's data folder (tezca.db, blobs/). */
+	dataDir: string;
 	stop(): Promise<void>;
 }
 
@@ -66,6 +68,7 @@ export async function startServer(): Promise<RealServer> {
 	}
 	return {
 		url,
+		dataDir: dir,
 		async stop() {
 			proc.kill("SIGTERM");
 			await new Promise((r) => setTimeout(r, 50));
