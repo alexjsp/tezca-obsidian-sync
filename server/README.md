@@ -43,6 +43,9 @@ For Docker, see [`deploy/README.md`](../deploy/README.md).
 | `TEZCA_DEBUG` | (unset) | Any value enables debug logging. |
 | `TEZCA_MAX_BLOB_MB` | `100` | Largest attachment (plaintext MiB). Uploads over this + 40 bytes of encryption overhead get 413. Shown to clients as `max_blob_bytes` in `/api/info`. |
 | `TEZCA_GUEST_QUOTA_MB` | `1024` | Storage cap per guest (a user who joined through a share invite and has no host account), in MiB: the attachments they upload plus the note edits and snapshots they write (until history pruning drops them). Uploads over it get 507, edits get `TOO_LARGE`. `0` = unlimited. |
+| `TEZCA_MAX_CONNS` | `1000` | Most concurrent WebSocket connections (authenticated or not). More get HTTP 503. `0` = unlimited. |
+| `TEZCA_MAX_CONNS_PER_IP` | `50` | Most concurrent WebSocket connections from one client address. More get HTTP 429. `0` = unlimited. |
+| `TEZCA_TRUSTED_PROXIES` | loopback, private and CGNAT ranges | Comma-separated CIDRs or addresses of reverse proxies whose `X-Forwarded-For` (or `X-Real-IP`) header names the client, for per-address limits. The default (`127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10,fc00::/7`) covers a proxy on the same host, in Docker, on the LAN or on a tailnet. `none` ignores those headers. If the server is directly reachable from a network you don't trust, narrow this to your proxy's address. |
 | `TEZCA_HISTORY_HOURS` | `24` | Version history: keep the newest snapshot per clock hour for this many hours. |
 | `TEZCA_HISTORY_DAYS` | `30` | Version history: keep the newest snapshot per UTC day for this many days, and the edit log for this long (point-in-time restore). The latest snapshot is always kept. |
 

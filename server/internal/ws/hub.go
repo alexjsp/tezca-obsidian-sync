@@ -14,6 +14,7 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -39,16 +40,32 @@ const (
 	DefaultQueueSize = 1024
 )
 
+// Limits on connections before (and while) they authenticate.
+const (
+	// PreAuthReadLimit bounds frames until AuthOk: Hello and Auth are well under 1 KiB.
+	PreAuthReadLimit = 4 << 10
+	MaxDeviceID      = 64 // bytes
+	// Defaults for TEZCA_MAX_CONNS and TEZCA_MAX_CONNS_PER_IP.
+	DefaultMaxConns      = 1000
+	DefaultMaxConnsPerIP = 50
+)
+
 // Config configures a Hub.
 type Config struct {
 	Store        *store.Store
 	ServerID     string
 	Logger       *slog.Logger
 	IdleTimeout  time.Duration // default 90s
-	AuthTimeout  time.Duration // default 30s
+	AuthTimeout  time.Duration // default 10s
 	WriteTimeout time.Duration // default 30s
 	QueueSize    int           // default 1024 frames
 	Now          func() time.Time
+	// MaxConns and MaxConnsPerIP cap concurrent WebSocket connections, authenticated or not,
+	// in total and per client address (ClientIP). 0 = unlimited.
+	MaxConns      int
+	MaxConnsPerIP int
+	// ClientIP returns a request's client address (default: the TCP peer's).
+	ClientIP func(*http.Request) string
 	// GuestQuotaBytes caps what each guest stores on the host: blobs plus the updates and
 	// snapshots they author (store.UserBytes). 0 = unlimited.
 	GuestQuotaBytes int64
@@ -73,6 +90,10 @@ type Hub struct {
 	users map[string]map[*conn]struct{} // authenticated conns by sign_pk
 	shut  bool
 
+	slotsMu sync.Mutex // guards open, perIP
+	open    int
+	perIP   map[string]int
+
 	spacesMu sync.Mutex // guards spaces
 	spaces   map[string]map[*conn]struct{}
 }
@@ -83,7 +104,16 @@ func NewHub(cfg Config) *Hub {
 		cfg.IdleTimeout = 90 * time.Second
 	}
 	if cfg.AuthTimeout == 0 {
-		cfg.AuthTimeout = 30 * time.Second
+		cfg.AuthTimeout = 10 * time.Second
+	}
+	if cfg.ClientIP == nil {
+		cfg.ClientIP = func(r *http.Request) string {
+			host, _, err := net.SplitHostPort(r.RemoteAddr)
+			if err != nil {
+				return r.RemoteAddr
+			}
+			return host
+		}
 	}
 	if cfg.WriteTimeout == 0 {
 		cfg.WriteTimeout = 30 * time.Second
@@ -104,11 +134,45 @@ func NewHub(cfg Config) *Hub {
 		conns:  map[*conn]struct{}{},
 		users:  map[string]map[*conn]struct{}{},
 		spaces: map[string]map[*conn]struct{}{},
+		perIP:  map[string]int{},
+	}
+}
+
+// acquire takes a connection slot for ip, or returns the HTTP status to refuse with.
+func (h *Hub) acquire(ip string) (ok bool, status int) {
+	h.slotsMu.Lock()
+	defer h.slotsMu.Unlock()
+	if h.cfg.MaxConns > 0 && h.open >= h.cfg.MaxConns {
+		return false, http.StatusServiceUnavailable
+	}
+	if h.cfg.MaxConnsPerIP > 0 && h.perIP[ip] >= h.cfg.MaxConnsPerIP {
+		return false, http.StatusTooManyRequests
+	}
+	h.open++
+	h.perIP[ip]++
+	return true, 0
+}
+
+func (h *Hub) release(ip string) {
+	h.slotsMu.Lock()
+	defer h.slotsMu.Unlock()
+	h.open--
+	if h.perIP[ip]--; h.perIP[ip] <= 0 {
+		delete(h.perIP, ip)
 	}
 }
 
 // ServeHTTP upgrades the request to a WebSocket session.
 func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	ip := h.cfg.ClientIP(r)
+	ok, status := h.acquire(ip)
+	if !ok {
+		h.log.Debug("refusing WebSocket connection", "ip", ip, "status", status)
+		w.Header().Set("Retry-After", "10")
+		http.Error(w, "too many connections", status)
+		return
+	}
+	defer h.release(ip)
 	ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		// Auth is by Ed25519 signature, not cookies, and Obsidian clients send app:// or
 		// capacitor:// origins, so origin checks add nothing.
@@ -118,7 +182,7 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	ws.SetReadLimit(ReadLimit)
+	ws.SetReadLimit(PreAuthReadLimit) // raised to ReadLimit after AuthOk
 	c := newConn(h, ws)
 	h.mu.Lock()
 	if h.shut {

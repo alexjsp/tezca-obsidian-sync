@@ -220,6 +220,9 @@ func (c *conn) handshake(ctx context.Context) bool {
 	if len(hello.SignPk) != 32 {
 		return unauth("bad sign_pk")
 	}
+	if len(hello.DeviceId) > MaxDeviceID {
+		return unauth("device_id too long")
+	}
 	user, err := c.h.cfg.Store.GetUser(ctx, hello.SignPk)
 	if err != nil {
 		return unauth("unknown user")
@@ -230,6 +233,7 @@ func (c *conn) handshake(ctx context.Context) bool {
 	c.user = user
 	c.deviceID = hello.DeviceId
 	c.h.registerUser(c) // before AuthOk, so a client that has seen AuthOk gets SpaceChanged
+	c.ws.SetReadLimit(ReadLimit)
 	c.send(&pb.ServerFrame{Msg: &pb.ServerFrame_AuthOk{AuthOk: &pb.AuthOk{
 		SignPk: user.SignPk, BoxPk: user.BoxPk, Role: pb.HostRole(user.Role),
 	}}})

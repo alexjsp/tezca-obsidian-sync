@@ -139,6 +139,12 @@ Clients accept either form wherever a link is pasted: an `obsidian://tezca?…` 
    Otherwise it sends `AuthOk{sign_pk, box_pk, role}`.
 4. Any other frame before `AuthOk` is rejected with `UNAUTHORIZED` and the connection is closed.
 
+Limits before `AuthOk`: frames are capped at 4 KiB (a larger one closes the connection with status
+1009), `device_id` at 64 bytes (longer is `UNAUTHORIZED`), and the client has 10 s from the upgrade
+to authenticate. After `AuthOk` frames may be up to 17 MiB. The server caps concurrent WebSocket
+connections in total (`TEZCA_MAX_CONNS`, default 1000; refused with HTTP 503) and per client
+address (`TEZCA_MAX_CONNS_PER_IP`, default 50; refused with HTTP 429) before upgrading.
+
 Request/response frames carry `rid` (requests) or `ref` (pushes). Errors echo it in `Error.rid`.
 
 ### Spaces

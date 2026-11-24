@@ -24,6 +24,7 @@ import (
 
 	"tezca/server/internal/api"
 	"tezca/server/internal/blobs"
+	"tezca/server/internal/clientip"
 	"tezca/server/internal/store"
 	"tezca/server/internal/ws"
 )
@@ -152,6 +153,18 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	maxConns, err := envInt("TEZCA_MAX_CONNS", ws.DefaultMaxConns)
+	if err != nil {
+		return err
+	}
+	maxConnsPerIP, err := envInt("TEZCA_MAX_CONNS_PER_IP", ws.DefaultMaxConnsPerIP)
+	if err != nil {
+		return err
+	}
+	clientIP, err := clientip.Parse(env("TEZCA_TRUSTED_PROXIES", clientip.DefaultTrusted))
+	if err != nil {
+		return fmt.Errorf("TEZCA_TRUSTED_PROXIES: %w", err)
+	}
 	var history store.History
 	if history.Hours, err = envInt("TEZCA_HISTORY_HOURS", store.DefaultHistory.Hours); err != nil {
 		return err
@@ -176,7 +189,10 @@ func run() error {
 		return fmt.Errorf("init store: %w", err)
 	}
 
-	hub := ws.NewHub(ws.Config{Store: st, ServerID: serverID, Logger: log, GuestQuotaBytes: int64(guestQuotaMB) << 20})
+	hub := ws.NewHub(ws.Config{
+		Store: st, ServerID: serverID, Logger: log, GuestQuotaBytes: int64(guestQuotaMB) << 20,
+		MaxConns: maxConns, MaxConnsPerIP: maxConnsPerIP, ClientIP: clientIP.IP,
+	})
 	handler := api.New(api.Config{
 		Store: st, Hub: hub, Notify: hub, ServerID: serverID, PublicURL: publicURL, Name: name, PluginRepo: pluginRepo, Logger: log,
 		Blobs: blobStore, MaxBlobBytes: int64(maxBlobMB) << 20, GuestQuotaBytes: int64(guestQuotaMB) << 20,
