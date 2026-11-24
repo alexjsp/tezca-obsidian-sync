@@ -43,6 +43,30 @@ type env struct {
 	clock    *fakeClock   // the hub's clock (snapshot created_at)
 	apiClock *offsetClock // the HTTP API's clock: real time plus a settable offset
 	blobDir  string       // filesystem blob store root
+
+	tsMu   sync.Mutex
+	lastTS map[string]int64 // signed request → last ts used, see signTS
+}
+
+// signTS returns the timestamp to sign a request with: now + skew, or for a state-changing
+// request one second after the last ts used for an identical one, as a client must do (the
+// server refuses a reused signature).
+func (e *env) signTS(method, path string, body []byte, skew time.Duration) int64 {
+	ts := time.Now().Add(skew).Unix()
+	if method == "GET" || method == "HEAD" || skew != 0 {
+		return ts // reads may repeat a signature; skew tests want exactly this ts
+	}
+	k := method + " " + path + " " + string(body)
+	e.tsMu.Lock()
+	defer e.tsMu.Unlock()
+	if e.lastTS == nil {
+		e.lastTS = map[string]int64{}
+	}
+	if prev, ok := e.lastTS[k]; ok && ts <= prev {
+		ts = prev + 1
+	}
+	e.lastTS[k] = ts
+	return ts
 }
 
 // testMaxBlob is the plaintext blob limit in tests: small, so 413s don't need huge bodies.
@@ -161,7 +185,7 @@ func (e *env) call(method, path string, body any, signer *ident, skew time.Durat
 	}
 	req, _ := http.NewRequest(method, e.srv.URL+path, bytes.NewReader(raw))
 	if signer != nil {
-		ts := time.Now().Add(skew).Unix()
+		ts := e.signTS(method, path, raw, skew)
 		sig := signer.sign(sigs.HTTP(method, path, uint64(ts), raw))
 		req.Header.Set("Authorization", fmt.Sprintf("Tezca pk=%s, ts=%d, sig=%s", b64.EncodeToString(signer.pk), ts, b64.EncodeToString(sig)))
 	}
@@ -199,7 +223,7 @@ func (e *env) rawCall(method, path string, body []byte, signer *ident, signBody 
 		if signBody == nil {
 			signBody = body
 		}
-		ts := time.Now().Unix()
+		ts := e.signTS(method, path, signBody, 0)
 		sig := signer.sign(sigs.HTTP(method, path, uint64(ts), signBody))
 		req.Header.Set("Authorization", fmt.Sprintf("Tezca pk=%s, ts=%d, sig=%s", b64.EncodeToString(signer.pk), ts, b64.EncodeToString(sig)))
 	}

@@ -80,9 +80,10 @@ type Notifier interface {
 
 // API is the HTTP handler.
 type API struct {
-	cfg Config
-	log *slog.Logger
-	mux *http.ServeMux
+	cfg    Config
+	log    *slog.Logger
+	mux    *http.ServeMux
+	replay *replayCache
 }
 
 // New returns the HTTP handler.
@@ -106,7 +107,7 @@ func New(cfg Config) *API {
 	if !ValidPluginRepo(cfg.PluginRepo) {
 		cfg.PluginRepo = DefaultPluginRepo
 	}
-	a := &API{cfg: cfg, log: cfg.Logger, mux: http.NewServeMux()}
+	a := &API{cfg: cfg, log: cfg.Logger, mux: http.NewServeMux(), replay: newReplayCache()}
 	m := a.mux
 	m.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "ok") })
 	m.HandleFunc("GET /api/info", a.info)
@@ -358,6 +359,20 @@ func (ah authHeader) verify(r *http.Request, bodySHA256 []byte) bool {
 	return sigs.Verify(ah.pk, sigs.HTTPDigest(r.Method, r.RequestURI, uint64(ah.ts), bodySHA256), ah.sig)
 }
 
+// checkReplay refuses (409) a state-changing request whose signature was already used. Since
+// the signature covers method, URI, ts and body, a client that sends the same request twice
+// within one second must re-sign the second with a later ts. GET and HEAD are exempt: they change nothing, and identical reads in the same second legitimately carry
+// identical signatures (Ed25519 is deterministic). So are blob PUTs, which are idempotent.
+func (a *API) checkReplay(r *http.Request, ah authHeader) error {
+	if r.Method == http.MethodGet || r.Method == http.MethodHead {
+		return nil
+	}
+	if !a.replay.firstUse(ah.pk, ah.sig, ah.ts, a.cfg.Now().Unix()) {
+		return herr(http.StatusConflict, "duplicate request: sign it again with a new timestamp")
+	}
+	return nil
+}
+
 // user returns the registered user for the header's key.
 func (a *API) user(r *http.Request, ah authHeader) (store.User, error) {
 	u, err := a.cfg.Store.GetUser(r.Context(), ah.pk)
@@ -381,6 +396,9 @@ func (a *API) authenticate(r *http.Request) (store.User, []byte, error) {
 	sum := sha256.Sum256(body)
 	if !ah.verify(r, sum[:]) {
 		return store.User{}, nil, herr(http.StatusUnauthorized, "bad signature")
+	}
+	if err := a.checkReplay(r, ah); err != nil {
+		return store.User{}, nil, err
 	}
 	u, err := a.user(r, ah)
 	if err != nil {

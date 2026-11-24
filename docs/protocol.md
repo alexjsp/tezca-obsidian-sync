@@ -104,8 +104,8 @@ because authentication is by signature, never by cookies.
 
 HTTP errors return a JSON body `{"error": "..."}` with status 400 (bad input), 401 (bad, missing or
 skewed signature, or unknown user), 403 (not admin, wrong claim code, or not a member of the space / not allowed to write), 404 (unknown invite or
-pairing), 409 (already claimed, invite redeemed by another key, last owner, key set doesn't match), 410 (invite expired or revoked) or
-413 (too large).
+pairing), 409 (already claimed, invite redeemed by another key, last owner, key set doesn't match, reused signature), 410 (invite expired or revoked),
+413 (too large) or 429 (too many open pairings, or too many failed attempts; see "Rate limits").
 
 Request bodies have read deadlines: a JSON body must arrive within 30 s, and a blob upload may take
 as long as it keeps moving, but a pause of more than 60 s ends it. The connection is closed when a
@@ -114,6 +114,12 @@ deadline passes.
 JSON byte fields are `b64u`. HTTP sig header:
 `Authorization: Tezca pk=<b64u sign_pk>, ts=<unix seconds>, sig=<b64u>` with ±300 s skew allowed.
 `path_with_query` is the request URI as sent, e.g. `/api/invites`.
+
+Each signature on a state-changing request (anything but `GET`/`HEAD`, and except blob `PUT`s,
+which are idempotent) is accepted once: the server remembers `(pk, ts, sig)` for as long as `ts`
+is within the skew window and answers a repeat with 409 `duplicate request: sign it again with a
+new timestamp`. Ed25519 signatures are deterministic, so a client that sends the same request twice
+within one second must sign the second one with a later `ts`.
 
 #### Removing a user
 
