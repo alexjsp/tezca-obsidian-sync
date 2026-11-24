@@ -294,3 +294,20 @@ for attachments; for notes, most of the last-synced text still present and a uni
 
 Not done in M5: a canvas open in Obsidian picks up remote changes when Obsidian reloads the file from disk
 (no live canvas editor binding like Markdown's); converting existing attachment-kind canvases to live ones.
+
+## Status after M5 (2026-11-24)
+
+Tests: 67 plugin tests (mock host, real Go server, two real servers), Go tests with `-race`. Final simulator
+batch (250 steps, 4 clients, attachments and canvases): shared-folder mode 29/30, single-user 19/20. Every
+failure investigated during M2–M5 was a real bug and is fixed with a test, except two that didn't reproduce
+on rerun (each ≤ 1 in 4 on its seed):
+- seed 61008 (single-user): edits stranded in a note an offline device deleted, where the simulator couldn't
+  attribute the delete to that note's content. Either the device deleted a different file at that path and
+  the delete mapped onto this note, or a simulator attribution gap. The edits remain in the note's history.
+- seed 60012 (shared folder): one device kept files whose entries were deleted everywhere else (its share
+  mirror didn't apply those remote deletes).
+Next steps there: rerun those seeds with `TEZCA_TRACE`-style logging (the approach used throughout) until they
+reproduce.
+
+Not yet tried in real Obsidian: anything from M3–M5 (shares, guests, multiple hosts, live canvas, settings
+sync). The server for M3–M5 isn't deployed and no plugin release has been made since 0.2.0.

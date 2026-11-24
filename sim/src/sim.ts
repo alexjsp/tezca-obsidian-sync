@@ -359,10 +359,10 @@ async function run(seed: number, nClients: number, steps: number, bin: string): 
 					op = `rename ${p} → ${to}`;
 				} else if (r < 0.8) {
 					const p = pick(files);
-					const lin = lineageOf(c.vault.files.get(p));
+					const lin = lineageOf(c.vault.files.get(p) as string);
 					if (lin) deletedLineages.add(lin);
 					await c.vault.remove(p);
-					op = `delete ${p}`;
+					op = `delete ${p} (lineage ${lin ?? "none"})`;
 				} else if (r < 0.88) {
 					c.offline = !c.offline;
 					for (const s of c.sockets) s.terminate();
