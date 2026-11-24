@@ -39,6 +39,12 @@ export interface ConnectionOptions {
 	deviceId: string;
 	clientVersion: string;
 	WebSocketImpl?: WSCtor;
+	/**
+	 * Is this the server we expect at `host`? Called with the server id from each login challenge,
+	 * before signing it (a host relaying another host's challenge would otherwise get a session
+	 * there in our name). Typically pins the first id seen.
+	 */
+	checkServerId?: (serverId: string) => Promise<boolean>;
 }
 
 export class ServerError extends Error {
@@ -208,17 +214,28 @@ export class HostConnection {
 	private handleFrame(m: ServerMsg) {
 		switch (m.case) {
 			case "challenge": {
-				const { identity, deviceId, clientVersion } = this.opts;
 				if (m.value.protocolVersion !== PROTOCOL_VERSION) {
 					this.fatal("update-required");
 					return;
 				}
-				this.rawSend({
-					case: "hello",
-					value: { signPk: identity.signPk, deviceId, protocolVersion: PROTOCOL_VERSION, clientVersion },
+				const challenge = m.value;
+				const ws = this.ws;
+				const check = this.opts.checkServerId?.(challenge.serverId) ?? Promise.resolve(true);
+				void check.then((ok) => {
+					if (this.ws !== ws) return;
+					if (!ok) {
+						log.error(`${this.opts.host} presented a different server identity than before; not signing in`);
+						this.fatal("unauthorized");
+						return;
+					}
+					const { identity, deviceId, clientVersion } = this.opts;
+					this.rawSend({
+						case: "hello",
+						value: { signPk: identity.signPk, deviceId, protocolVersion: PROTOCOL_VERSION, clientVersion },
+					});
+					const sig = sign(identity, sigMsg.auth(challenge.serverId, challenge.nonce, identity.signPk, deviceId));
+					this.rawSend({ case: "auth", value: { sig } });
 				});
-				const sig = sign(identity, sigMsg.auth(m.value.serverId, m.value.nonce, identity.signPk, deviceId));
-				this.rawSend({ case: "auth", value: { sig } });
 				return;
 			}
 			case "authOk":

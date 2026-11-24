@@ -77,3 +77,21 @@ describe("key trust (real server)", () => {
 		await eventually(() => a.vault.files.get("Team/from-sam.md") === "hi", 10_000, "and back");
 	});
 });
+
+describe("server identity pinning (real server)", () => {
+	it("won't sign in to a host that presents a different server identity than before", async () => {
+		const alex = await claimAdmin(server, "Alex");
+		const a = await startDevice(server, alex, "a");
+		devices.push(a);
+		const key = `serverid/${server.url}`;
+		expect(await a.store.get<string>(key)).toBeTruthy();
+		await a.engine.stop();
+		devices = [];
+		// As if another server (or one relaying another host's login) now answered at this address.
+		await a.store.put(key, "someOtherServerId");
+		const a2 = await startDevice(server, alex, "a", a.vault, a.store).catch((e) => e as Error);
+		if (!(a2 instanceof Error)) devices.push(a2);
+		const status = a2 instanceof Error ? "unauthorized" : a2.engine.primary.conn.status;
+		expect(status).toBe("unauthorized");
+	});
+});

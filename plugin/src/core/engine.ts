@@ -96,6 +96,16 @@ export class HostLink {
 			deviceId: opts.deviceId,
 			clientVersion: opts.clientVersion,
 			WebSocketImpl: opts.WebSocketImpl,
+			// Pin the server identity this device first saw for this host.
+			checkServerId: async (id) => {
+				const key = `serverid/${host}`;
+				const pinned = await opts.store.get<string>(key);
+				if (!pinned) {
+					await opts.store.put(key, id);
+					return true;
+				}
+				return pinned === id;
+			},
 		});
 		this.api = new HostApi(host, http);
 		this.shareApi = new ShareApi(this.api, opts.identity);
