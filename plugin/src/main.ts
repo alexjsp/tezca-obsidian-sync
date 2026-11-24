@@ -263,8 +263,30 @@ export default class TezcaPlugin extends Plugin {
 
 	// ───────────── engine ─────────────
 
-	async startEngine() {
-		await this.stopEngine();
+	/** Engine starts and stops run one at a time (a stop closes the store a start may be using). */
+	private engineOps: Promise<void> = Promise.resolve();
+	private startQueued = false;
+
+	/** (Re)start sync. A burst of calls (e.g. several settings toggled quickly) restarts once. */
+	startEngine(): Promise<void> {
+		if (this.startQueued) return this.engineOps;
+		this.startQueued = true;
+		this.engineOps = this.engineOps
+			.then(() => {
+				this.startQueued = false;
+				return this.startEngineNow();
+			})
+			.catch((e) => log.error("engine start failed", e));
+		return this.engineOps;
+	}
+
+	stopEngine(): Promise<void> {
+		this.engineOps = this.engineOps.then(() => this.stopEngineNow()).catch((e) => log.error("engine stop failed", e));
+		return this.engineOps;
+	}
+
+	private async startEngineNow() {
+		await this.stopEngineNow();
 		if (!this.isConfigured) return this.renderStatus();
 		this.identity = await this.loadIdentity();
 		if (!this.identity) {
@@ -332,7 +354,7 @@ export default class TezcaPlugin extends Plugin {
 		this.editors.rebindViews(views);
 	}
 
-	async stopEngine() {
+	private async stopEngineNow() {
 		this.editors?.unbindAll();
 		const e = this.engine;
 		this.engine = null;
