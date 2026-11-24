@@ -84,6 +84,14 @@ export interface ServerInfo {
 	features?: string[];
 }
 
+export interface HostUser {
+	sign_pk: string;
+	box_pk: string;
+	role: "admin" | "member" | "guest";
+	/** unix seconds */
+	created_at: number;
+}
+
 export class HostApi {
 	constructor(
 		readonly host: string,
@@ -120,6 +128,16 @@ export class HostApi {
 	/** A signed JSON request (any method). */
 	signed<T = unknown>(method: string, path: string, identity: Identity, body?: unknown): Promise<T> {
 		return this.call<T>(method, path, body, identity);
+	}
+
+	/** People with an account on this host (admins only). */
+	async listUsers(id: Identity): Promise<HostUser[]> {
+		return (await this.call<{ users: HostUser[] }>("GET", "/api/users", undefined, id)).users;
+	}
+
+	/** Remove someone's account from this host (admins only). */
+	removeUser(id: Identity, signPk: Uint8Array): Promise<unknown> {
+		return this.call("DELETE", `/api/users/${b64u(signPk)}`, undefined, id);
 	}
 
 	info(): Promise<ServerInfo> {

@@ -95,7 +95,7 @@ func TestLandingPage(t *testing.T) {
 		t.Fatalf("landing: %d %v", code, hdr)
 	}
 	mustContain(t, "unclaimed landing", body, "Not set up yet", "Claim this server", "docker compose logs tezca",
-		"recovery phrase", api.DefaultPluginRepo, "/api/info", "Protocol v1")
+		"recovery key", api.DefaultPluginRepo, "/api/info", "Protocol v1")
 	mustNotContain(t, "unclaimed landing", body, "Pair device", "Ready")
 
 	e.claim(newIdent())

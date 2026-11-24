@@ -1,5 +1,7 @@
 import { App, ButtonComponent, ExtraButtonComponent, Notice, PluginSettingTab, Setting, setIcon } from "obsidian";
-import { copyText } from "./modals";
+import { confirm, copyText } from "./modals";
+import { b64u, fromB64u, hex } from "../core/crypto";
+import type { HostUser } from "../core/setup";
 import { renderAvatar } from "./avatar";
 import type TezcaPlugin from "../main";
 import { ShareModal } from "./share-modal";
@@ -112,6 +114,7 @@ export class TezcaSettingTab extends PluginSettingTab {
 				.setName("Invite someone to this host")
 				.setDesc("They get their own private synced vaults here. The link works once.")
 				.addButton((b) => b.setButtonText("Create invite").onClick(() => void p.createInvite()));
+			void this.renderPeople(containerEl.createDiv({ cls: "tezca-people" }));
 		}
 
 		// ── Shared folders ──
@@ -201,6 +204,49 @@ export class TezcaSettingTab extends PluginSettingTab {
 			.setName("Disconnect this vault")
 			.setDesc("Stop syncing on this device. Your files stay as they are.")
 			.addButton((b) => b.setButtonText("Disconnect").setWarning().onClick(() => void p.disconnect()));
+	}
+
+	/** Everyone with an account on this host, with Remove (admins). */
+	private async renderPeople(el: HTMLElement) {
+		const p = this.plugin;
+		if (!p.identity || !p.engine) return;
+		let users: HostUser[];
+		try {
+			users = await p.engine.primary.api.listUsers(p.identity);
+		} catch {
+			return; // an older host without the list
+		}
+		el.empty();
+		const names = p.engine.knownNames();
+		const me = b64u(p.identity.signPk);
+		for (const u of users) {
+			const key = hex(fromB64u(u.sign_pk)).slice(0, 16).match(/.{4}/g)!.join(" ");
+			const isMe = u.sign_pk === me;
+			const name = isMe ? `${p.settings.displayName || "You"} (you)` : names.get(u.sign_pk) ?? `Key ${key}`;
+			const row = new Setting(el).setName(name).setDesc([u.role[0].toUpperCase() + u.role.slice(1), names.has(u.sign_pk) || isMe ? `key ${key}` : "", `joined ${new Date(u.created_at * 1000).toLocaleDateString()}`].filter(Boolean).join(" · "));
+			if (isMe) continue;
+			row.addButton((b) =>
+				b
+					.setButtonText("Remove")
+					.setWarning()
+					.onClick(async () => {
+						const ok = await confirm(
+							this.app,
+							`Remove ${name} from this host?`,
+							"All of their devices lose access straight away. Their own synced vaults stay on the host but can't be opened by them any more. Shared folders of yours they were in get a new key, so they can't read anything written from now on (they keep what they already have).",
+							"Remove",
+						);
+						if (!ok) return;
+						try {
+							await p.engine!.removeHostUser(fromB64u(u.sign_pk));
+							new Notice(`Removed ${name}`);
+							void this.renderPeople(el);
+						} catch (e) {
+							new Notice(`Couldn't remove: ${(e as Error).message}`);
+						}
+					}),
+			);
+		}
 	}
 
 	/** Profile row (before setup, where there's no account card). */

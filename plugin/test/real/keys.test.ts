@@ -107,3 +107,31 @@ describe("signed requests (real server)", () => {
 		expect(a.token).not.toBe(b.token);
 	});
 });
+
+describe("removing someone from the host (real server)", () => {
+	it("cuts off all their devices and gives shared folders they were in a new key", async () => {
+		const alex = await claimAdmin(server, "Alex");
+		const sam = await inviteMember(server, alex, "Sam");
+		const a = await startDevice(server, alex, "a");
+		const s = await startDevice(server, sam, "s");
+		devices.push(a, s);
+		await a.vault.userWrite("Team/x.md", "x");
+		await eventually(() => a.engine.mirror!.index.live().some((e) => e.path === "Team/x.md"), 5000, "imported");
+		const spaceId = await a.engine.shareFolder("Team", "Team");
+		await eventually(() => a.engine.shares.has(spaceId), 10_000, "shared");
+		const p = linkParams(await a.engine.createInvite(spaceId, "editor"))!;
+		await s.engine.joinShare(p.token!, p.k!, async () => "Team");
+		await eventually(() => s.engine.shares.has(spaceId), 10_000, "joined");
+		const users = await a.engine.primary.api.listUsers(alex.id);
+		expect(users.map((u) => u.role).sort()).toEqual(["admin", "member"]);
+		const epoch = a.engine.shares.get(spaceId)!.space.currentEpoch();
+
+		await a.engine.removeHostUser(sam.id.signPk);
+		await eventually(() => s.engine.primary.conn.status === "unauthorized" || s.engine.primary.conn.status === "offline", 10_000, "Sam cut off");
+		await eventually(() => a.engine.shares.get(spaceId)!.space.currentEpoch() === epoch + 1, 10_000, "new key");
+		expect((await a.engine.primary.api.listUsers(alex.id)).length).toBe(1);
+		await a.vault.userWrite("Team/after.md", "secret");
+		await new Promise((r) => setTimeout(r, 1000));
+		expect(s.vault.files.has("Team/after.md")).toBe(false);
+	});
+});

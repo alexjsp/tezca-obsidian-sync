@@ -709,6 +709,28 @@ export class SyncEngine {
 		await this.refreshInfos(l);
 	}
 
+	/**
+	 * Remove someone from this user's host (admins). Shared folders this user owns that they
+	 * were in get a new key, so they can't read anything written from now on.
+	 */
+	async removeHostUser(signPk: Uint8Array): Promise<void> {
+		const l = this.primary;
+		await this.refreshInfos(l);
+		const owned = [...l.infos.values()].filter(
+			(i) => i.kind === SpaceKind.SHARE && i.role === SpaceRole.OWNER && i.members.some((m) => b64u(m.signPk) === b64u(signPk)),
+		);
+		await l.api.removeUser(this.opts.identity, signPk);
+		for (const i of owned) await this.rotateKey(i.spaceId).catch((e) => log.warn(`couldn't rotate ${i.spaceId} after removing a user`, e));
+		await this.refreshInfos(l);
+	}
+
+	/** Names for people we share folders with (sign pk b64u → name). */
+	knownNames(): Map<string, string> {
+		const out = new Map<string, string>();
+		for (const sh of this.shares.values()) for (const m of this.members(sh.spaceId)) if (m.name) out.set(b64u(m.signPk), m.name);
+		return out;
+	}
+
 	/** Leave a share: this user's devices unmount it and keep the files. */
 	async leaveShare(spaceId: string): Promise<void> {
 		const l = this.shareLink(spaceId);

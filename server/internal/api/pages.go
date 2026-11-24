@@ -160,7 +160,7 @@ var landingTmpl = template.Must(template.Must(pages.Clone()).New("landing").Pars
 <li><b>Set up the Tezca plugin</b><span class="d">On the device you'll use first: install Obsidian, then the BRAT plugin, and add <code>{{.Repo}}</code> in BRAT (<a href="https://github.com/{{.Repo}}" rel="noopener noreferrer">GitHub</a>). Enable Tezca.</span></li>
 <li><b>Find the claim link</b><span class="d">It's in the server's log. With Docker Compose run <code>docker compose logs tezca</code> and look for the line starting with <code>Claim this server</code>.</span></li>
 <li><b>Open the claim link</b><span class="d">Open it in a browser and press <span class="ui">Open in Obsidian</span>, or scan its QR code with your phone.</span></li>
-<li><b>Save your recovery phrase</b><span class="d">The plugin shows a 24-word recovery phrase. Write it down: it's the only way back in if you lose every device.</span></li>
+<li><b>Save your recovery key</b><span class="d">The plugin shows a recovery key (TZCA-…). Save it in your password manager or write it down: it's the only way back in if you lose every device.</span></li>
 </ol>
 </div>
 {{end}}
@@ -178,7 +178,7 @@ var claimTmpl = template.Must(template.New("claim").Parse(`<!doctype html>
 <ol>
 <li>Make sure the <b>Tezca</b> plugin is installed and enabled in Obsidian.</li>
 <li>On this device, press <b>Open in Obsidian</b>. On a phone, scan the QR code instead.</li>
-<li>The plugin creates your identity and shows a <b>recovery phrase</b>. Write it down: it's the only way back in if you lose all your devices.</li>
+<li>The plugin creates your identity and shows a <b>recovery key</b> (TZCA-…). Save it somewhere safe: it's the only way back in if you lose all your devices.</li>
 </ol>
 <p class="center"><a class="btn" href="{{.Link}}">Open in Obsidian</a></p>
 <img class="qr" src="{{.QR}}" alt="QR code for the claim link" width="240" height="240">
