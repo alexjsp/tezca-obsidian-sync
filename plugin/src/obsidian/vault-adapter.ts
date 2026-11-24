@@ -55,11 +55,24 @@ export class ObsidianVault implements VaultAdapter {
 		return out;
 	}
 
+	/**
+	 * Run a read; if it fails because the file has gone (deleted by another app before Obsidian's
+	 * file list caught up), that's "missing", not an error.
+	 */
+	private async orMissing<T>(path: string, read: () => Promise<T>): Promise<T | null> {
+		try {
+			return await read();
+		} catch (e) {
+			if (!(await this.adapter.exists(normalizePath(path)).catch(() => true))) return null;
+			throw e;
+		}
+	}
+
 	async read(path: string): Promise<string | null> {
-		if (this.isConfig(path)) return (await this.adapter.exists(path)) ? this.adapter.read(path) : null;
+		if (this.isConfig(path)) return this.orMissing(path, () => this.adapter.read(path));
 		const f = this.vault.getAbstractFileByPath(normalizePath(path));
 		if (!(f instanceof TFile)) return null;
-		return this.vault.read(f);
+		return this.orMissing(path, () => this.vault.read(f));
 	}
 
 	async write(path: string, content: string): Promise<void> {
@@ -80,10 +93,10 @@ export class ObsidianVault implements VaultAdapter {
 	}
 
 	async readBinary(path: string): Promise<Uint8Array | null> {
-		if (this.isConfig(path)) return (await this.adapter.exists(path)) ? new Uint8Array(await this.adapter.readBinary(path)) : null;
+		if (this.isConfig(path)) return this.orMissing(path, async () => new Uint8Array(await this.adapter.readBinary(path)));
 		const f = this.vault.getAbstractFileByPath(normalizePath(path));
 		if (!(f instanceof TFile)) return null;
-		return new Uint8Array(await this.vault.readBinary(f));
+		return this.orMissing(path, async () => new Uint8Array(await this.vault.readBinary(f)));
 	}
 
 	async writeBinary(path: string, data: Uint8Array): Promise<void> {
@@ -106,7 +119,7 @@ export class ObsidianVault implements VaultAdapter {
 
 	async size(path: string): Promise<number | null> {
 		if (this.isConfig(path)) {
-			const st = await this.adapter.stat(path);
+			const st = await this.adapter.stat(path).catch(() => null);
 			return st?.type === "file" ? st.size : null;
 		}
 		const f = this.vault.getAbstractFileByPath(normalizePath(path));
