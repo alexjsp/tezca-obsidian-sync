@@ -166,6 +166,8 @@ describe("settings files are known by their path", () => {
 		for (const m of mirrors) delete (m as Partial<Repairable>).repairRenamedConfig;
 		await a.vault.userWrite("poke.md", "x");
 		await eventually(() => renamed(a.vault).length === 0 && renamed(b.vault).length === 0, 8000, "repaired");
+		// The duplicate that was removed on B was kept as a safety copy first.
+		expect([...b.vault.backups.keys()].some((k) => k.endsWith("/.obsidian/themes/T/manifest (dupDup).json")), JSON.stringify([...b.vault.backups.keys()])).toBe(true);
 		for (const v of [a.vault, b.vault]) {
 			expect(await text(v, ".obsidian/app.json")).toBe('{"spellcheck":true}');
 			expect(await text(v, ".obsidian/themes/T/manifest.json")).toBe('{"name":"T"}');
