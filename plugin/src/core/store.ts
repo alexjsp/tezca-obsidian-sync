@@ -8,6 +8,8 @@ export interface DocRecord {
 	lastSeq: string;
 	/** Local Yjs updates not yet acknowledged by the server. */
 	pending: Uint8Array[];
+	/** Newest key epoch of any update integrated (updates under older epochs are refused after it). */
+	maxEpoch?: number;
 }
 
 export interface LocalStore {

@@ -592,6 +592,12 @@ export class SyncEngine {
 		await l.shareApi.putKeys(res.space_id, keys.map((k) => ({ epoch: k.epoch, wrapped: wrapKey(k.key, this.opts.identity.boxPk) })));
 		await waitOnline(l.conn, 20_000).catch(() => undefined);
 		await this.refreshInfos(l);
+		// The invite's keys are authenticated by its secret: trust exactly those (and the owners
+		// listed now, to accept their future key rotations).
+		if (!(await this.opts.store.get(`keytrust/${res.space_id}`))) {
+			const owners = (l.infos.get(res.space_id)?.members ?? []).filter((m) => m.role === SpaceRole.OWNER).map((m) => b64u(m.signPk));
+			await this.opts.store.put(`keytrust/${res.space_id}`, { epochs: keys.map((k) => k.epoch), owners, ceiling: Math.max(...keys.map((k) => k.epoch)) });
+		}
 		if (this.mounts?.get(res.space_id)) return this.mounts.get(res.space_id)!.path; // already mounted
 		const info = l.infos.get(res.space_id);
 		const name = info ? new SpaceSync(l.conn, this.opts.store, this.opts.identity, info).meta?.name : undefined;
@@ -665,6 +671,8 @@ export class SyncEngine {
 	async setRole(spaceId: string, signPk: Uint8Array, role: ShareRole): Promise<void> {
 		const l = this.shareLink(spaceId);
 		await l.shareApi.setRole(spaceId, signPk, role);
+		// Vouch for a new owner, so other members' devices accept the keys they rotate.
+		if (role === "owner") this.shares.get(spaceId)?.space.recordOwner(b64u(signPk));
 		await this.refreshInfos(l);
 	}
 
@@ -686,6 +694,8 @@ export class SyncEngine {
 			info.epoch + 1,
 			info.members.map((m) => ({ signPk: m.signPk, wrapped: wrapKey(key, m.boxPk) })),
 		);
+		// Commit to the new key (signed), so members' devices accept it from us and not from the host.
+		await this.shares.get(spaceId)?.space.trustOwnKey(info.epoch + 1, key);
 		await this.refreshInfos(l);
 	}
 

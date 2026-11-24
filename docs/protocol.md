@@ -347,6 +347,25 @@ Awareness `user` carries `pk` (the sign_pk, b64u) so cursors can look the profil
 root (or profile) space has the same map with just their own `{avatar}`, so their devices share it.
 (Not a security boundary: any member can write any key. Signed membership is future work.)
 
+### Key commitments (client-defined)
+
+Wrapped keys come from the host, and sealed boxes are anonymous, so clients don't take a key's
+word for itself. A space's index doc has a `Y.Map` named `keys`: `epoch → JSON {fp, by, sig}`, where
+`fp = b64u(BLAKE2b-256(key="tezca-key-fp", space_key))` and `sig` is `by`'s Ed25519 signature over
+`sigInput("key-commit", space_id, u32(epoch), fp)`. Clients encrypt only with keys they trust:
+
+- ROOT/PROFILE spaces: committed by the user's own identity.
+- SHARE spaces: committed by an owner the device already trusts: owners present when it first
+  opened the share, plus owners vouched for in the index's `owners` map (`sign_pk b64u → {by,
+  sig}` over `sigInput("owner", space_id, owner)`) by a trusted owner; keys received through an
+  invite are trusted directly (the invite secret authenticates them).
+- Keys a device held before commitments existed (trust on first use, up to the epoch current then).
+
+Untrusted keys are used only to read, and are replaced if the host later offers a different key
+for that epoch. Owners commit new keys when they rotate, and devices commit trusted keys that lack a
+commitment. After a doc has integrated an update under epoch N, updates under older epochs are
+refused.
+
 ### Recommended plugins (client-defined)
 
 A share's index doc has a `Y.Map` named `plugins`: `community plugin id → JSON string {name,

@@ -48,6 +48,17 @@ export class DocSync {
 	private closed = false;
 	private hasSyncedOnce = false;
 	private awareness: Awareness | null = null;
+	/** Newest key epoch integrated so far (see handleUpdates). */
+	private maxEpoch = 0;
+	/** Stopped at an update an unverified key couldn't decrypt (see keysChanged). */
+	private waitingForKey = false;
+
+	/** The space's keys changed: fetch again anything we stopped at for want of the right key. */
+	keysChanged(): void {
+		if (!this.waitingForKey || this.closed) return;
+		this.waitingForKey = false;
+		this.resync("keys changed");
+	}
 	private subscribed = false;
 	/** created_at of the latest snapshot the host told us about (unix ms; 0 = none). */
 	private lastSnapshotAt = 0;
@@ -94,6 +105,7 @@ export class DocSync {
 			for (const u of rec.pending) Y.applyUpdate(this.ydoc, u, REMOTE_ORIGIN);
 		}, REMOTE_ORIGIN);
 		this.lastSeq = BigInt(rec.lastSeq);
+		this.maxEpoch = rec.maxEpoch ?? 0;
 		this.pending = rec.pending.map((u) => ({ update: u, ref: null }));
 		if (this.pending.length) this.ctx.notePending(this.docId, true);
 	}
@@ -153,6 +165,7 @@ export class DocSync {
 			return;
 		}
 		this.setSeq(s.baseSeq);
+		this.maxEpoch = Math.max(this.maxEpoch, s.epoch);
 		this.sinceSnapshot = { count: 0, bytes: 0 };
 		this.remoteApplied.emit();
 		this.scheduleSave();
@@ -178,11 +191,27 @@ export class DocSync {
 					log.warn(`bad signature on update ${u.seq} of ${this.key}, skipping`);
 					continue;
 				}
+				// After a key rotation nobody writes under the old key any more (the host refuses it),
+				// so a newer update under an older epoch can only come from someone who kept the old
+				// key, e.g. a removed member working with the host.
+				if (u.epoch < this.maxEpoch) {
+					log.warn(`update ${u.seq} of ${this.key} uses an older key (epoch ${u.epoch} < ${this.maxEpoch}), skipping`);
+					continue;
+				}
 				try {
 					const plain = open(this.ctx.keyFor(u.epoch), u.payload, ad.update(msg.spaceId, msg.docId, u.epoch));
 					Y.applyUpdate(this.ydoc, plain, REMOTE_ORIGIN);
+					this.maxEpoch = Math.max(this.maxEpoch, u.epoch);
 					applied = true;
 				} catch (e) {
+					if (!this.ctx.keyTrusted(u.epoch)) {
+						// The key we hold for this epoch isn't verified (it may be bogus, and the real
+						// one is still to come): don't lose the update; fetch it again when keys change.
+						log.warn(`can't decrypt update ${u.seq} of ${this.key} yet (unverified key for epoch ${u.epoch}); waiting for keys`);
+						this.setSeq(u.seq - 1n);
+						this.waitingForKey = true;
+						break;
+					}
 					log.warn(`decrypt failed on update ${u.seq} of ${this.key}`, e);
 				}
 			}
@@ -396,6 +425,7 @@ export class DocSync {
 		const rec: DocRecord = {
 			state: Y.encodeStateAsUpdate(this.ydoc),
 			lastSeq: this.lastSeq.toString(),
+			maxEpoch: this.maxEpoch,
 			pending: this.pending.length ? [Y.mergeUpdates(this.pending.map((p) => p.update))] : [],
 		};
 		await this.ctx.store.putDoc(this.key, rec);
