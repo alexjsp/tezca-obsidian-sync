@@ -1315,7 +1315,9 @@ export class DiskMirror {
 		if (e?.kind === "blob") return this.verifyBlob(id);
 		if (!e || e.deleted || !isDocKind(e.kind)) return;
 		const vp = this.toVault(e.path);
-		if (this.isBound(vp)) return;
+		// An open editor keeps its file in step, except for viewers: their editor refuses outside
+		// changes, so the file on disk is restored here.
+		if (this.isBound(vp) && !this.readOnly) return;
 		const base = await this.locate(e);
 		if (base === false) return;
 		const doc = base ? await this.space.acquire(id) : await this.space.acquireSynced(id);

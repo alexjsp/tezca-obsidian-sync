@@ -267,6 +267,7 @@ export default class TezcaPlugin extends Plugin {
 			this.renderStatus();
 		});
 		let lastConfigNotice = 0;
+		engine.sharesChanged.on(() => this.editors.refreshAccess());
 		engine.notices.on((n) => {
 			if (n.kind === "config") {
 				// One reminder per burst of settings changes.

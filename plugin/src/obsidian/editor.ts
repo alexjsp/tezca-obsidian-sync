@@ -33,6 +33,8 @@ interface Binding {
 	/** The space the doc belongs to (root or a share). */
 	space: SpaceSync | null;
 	generation: number;
+	/** Bound read-only (the user is a viewer of the doc's space). */
+	readOnly?: boolean;
 }
 
 export class EditorBindings {
@@ -152,11 +154,17 @@ export class EditorBindings {
 			const awareness = doc.getAwareness();
 			const user = this.getUser();
 			awareness.setLocalStateField("user", { name: user.name, color: user.color, colorLight: user.color + "33" });
-			const readOnly = space.canWrite() ? [] : [EditorState.readOnly.of(true), EditorView.editable.of(false)];
+			// View-only: no typing, and nothing else (e.g. Obsidian reloading the file after another app
+			// changed it) may change the text either, except the synced doc itself. The mirror puts the
+			// file on disk back.
+			const readOnly = space.canWrite()
+				? []
+				: [EditorState.readOnly.of(true), EditorView.editable.of(false), EditorState.changeFilter.of((tr) => tr.annotation(ySyncAnnotation) !== undefined)];
 			view.dispatch({ effects: collabCompartment.reconfigure([yCollab(ytext, awareness, { undoManager: false }), readOnly]) });
 			placeholder.docId = docId;
 			placeholder.doc = doc;
 			placeholder.space = space;
+			placeholder.readOnly = !space.canWrite();
 			log.debug(`bound editor to ${path}`);
 		} catch (e) {
 			log.warn(`could not bind editor for ${path}`, e);
@@ -200,6 +208,15 @@ export class EditorBindings {
 			if (u?.name) out.push({ name: u.name, color: u.color ?? "var(--text-muted)" });
 		});
 		return out;
+	}
+
+	/** Rebind editors whose write access changed (e.g. made a viewer, or an editor again). */
+	refreshAccess(): void {
+		for (const [view, b] of [...this.bindings]) {
+			if (!b.doc || !b.space || b.readOnly === !b.space.canWrite()) continue;
+			this.unbind(view, true);
+			void this.refresh(view);
+		}
 	}
 
 	unbindAll(): void {
