@@ -185,6 +185,8 @@ export class Device {
 		await this.exec(
 			async ({ app }, path, b64) => {
 				const bin = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+				const dir = path.split("/").slice(0, -1).join("/");
+				if (dir && !app.vault.getAbstractFileByPath(dir)) await app.vault.createFolder(dir);
 				const f = app.vault.getAbstractFileByPath(path);
 				if (f) await app.vault.modifyBinary(f, bin.buffer);
 				else await app.vault.createBinary(path, bin.buffer);
