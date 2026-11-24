@@ -89,6 +89,12 @@ export class Device {
 					orig(...args);
 				};
 			}
+			// Notices (what the user would see) go in the log too.
+			new MutationObserver((muts) => {
+				for (const m of muts)
+					for (const n of m.addedNodes)
+						if (n instanceof HTMLElement && n.classList.contains("notice")) buf.push(`${new Date().toISOString()} NOTICE ${n.textContent}`);
+			}).observe(document.body, { childList: true, subtree: true });
 			window.addEventListener("error", (e) => buf.push(`uncaught ${e.message}`));
 			window.addEventListener("unhandledrejection", (e) => buf.push(`unhandledrejection ${String(e.reason?.stack ?? e.reason)}`));
 		});
@@ -418,9 +424,14 @@ export class Device {
 	/** Click a button by its text inside `scope` (default: any window, topmost modal first). */
 	async clickButton(text: string, scope?: WebdriverIO.Element) {
 		const b = (scope ? await scope.$(`button=${text}`) : await this.find("button", { text })) as WebdriverIO.Element;
-		await b.waitForClickable({ timeout: 15_000 });
-		await b.waitForStable({ timeout: 5_000 }).catch(() => undefined); // mid-animation clicks get lost
-		await b.click();
+		await this.click(b);
+	}
+
+	/** Click once the element is clickable and has stopped moving (clicks mid-animation get lost or hit the backdrop). */
+	async click(el: WebdriverIO.Element) {
+		await el.waitForClickable({ timeout: 15_000 });
+		await el.waitForStable({ timeout: 5_000 }).catch(() => undefined);
+		await el.click();
 	}
 
 	/** The setting row (in `scope`, default: the settings window) whose name is `name`. */
@@ -439,7 +450,7 @@ export class Device {
 		const row = await this.settingRow(name, scope);
 		const toggle = await row.$(".checkbox-container");
 		const isOn = ((await toggle.getAttribute("class")) ?? "").includes("is-enabled");
-		if (isOn !== on) await toggle.click();
+		if (isOn !== on) await this.click(toggle as unknown as WebdriverIO.Element);
 		await this.browser.pause(200);
 	}
 
@@ -465,7 +476,7 @@ export class Device {
 	/** Acknowledge the recovery phrase screen. */
 	async ackRecoveryPhrase() {
 		const m = await this.modal("Your recovery phrase");
-		await m.$(".checkbox-container").click();
+		await this.click((await m.$(".checkbox-container")) as unknown as WebdriverIO.Element);
 		await this.clickButton("Done", m);
 		await this.noModal("Your recovery phrase");
 	}
@@ -474,7 +485,7 @@ export class Device {
 	async choose(title: string, option: string) {
 		const m = await this.modal(title);
 		const row = await this.settingRow(option, m);
-		await (await row.$("button")).click();
+		await this.click((await row.$("button")) as unknown as WebdriverIO.Element);
 		await this.noModal(title);
 	}
 
@@ -486,9 +497,8 @@ export class Device {
 		await el.waitForExist({ timeout: 15_000 });
 		await el.scrollIntoView();
 		await el.click({ button: "right" });
-		const menuItem = await this.browser.$(`.menu .menu-item-title=${item}`);
-		await menuItem.waitForDisplayed({ timeout: 10_000 });
-		await menuItem.click();
+		const menuItem = await this.find(".menu .menu-item-title", { text: item, timeout: 10_000 });
+		await this.click(menuItem);
 	}
 
 	/** Notices currently showing. */
