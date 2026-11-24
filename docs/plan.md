@@ -43,7 +43,7 @@ Agreed 2026-11-23. Background and prior art: [research.md](research.md).
 | Markdown | Live `Y.Text` per file. |
 | `.canvas` | Live CRDT (`Y.Map` nodes/edges) with a JSON ↔ CRDT bridge (M5). Until then, a blob. |
 | Attachments, `.base`, `.excalidraw`, other | Encrypted, content-addressed whole-file blobs, LWW + local conflict copy. Size cap is configurable. |
-| `.obsidian` | Private space only. Opt-in categories: core settings, appearance/themes/snippets, hotkeys, community plugin list + settings, plugin code. Always excluded: `workspace*.json`, our plugin's `data.json`/keys, caches. LWW blobs. |
+| `.obsidian` | Private space only. Opt-in categories: core settings, appearance/themes/snippets, hotkeys, community plugin list + settings, plugin code. Always excluded: `workspace*.json`, our plugin's `data.json`/keys, BRAT's `data.json` (its list of beta plugins is per device), caches. LWW blobs. |
 | Empty folders | Recorded in the index doc as folder entries (unlike YAOS). |
 
 ### History

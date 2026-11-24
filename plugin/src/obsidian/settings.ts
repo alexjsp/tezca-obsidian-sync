@@ -147,7 +147,7 @@ export class TezcaSettingTab extends PluginSettingTab {
 
 		// ── Settings sync ──
 		if (!p.engine?.isProfile) {
-			heading(containerEl, "Settings sync", "Choose, per device, which parts of Obsidian's settings sync through your vault. Changes from other devices apply after reloading Obsidian. Workspace layout and Tezca's own settings never sync.");
+			heading(containerEl, "Settings sync", "Choose, per device, which parts of Obsidian's settings sync through your vault. Changes from other devices apply after reloading Obsidian. Workspace layout, Tezca's own settings and BRAT's list of beta plugins never sync.");
 			const cats: [keyof typeof p.settings.configSync, string, string][] = [
 				["core", "Core settings", "Editor and app options, core plugins and their settings."],
 				["appearance", "Appearance", "Theme, themes and CSS snippets."],

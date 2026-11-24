@@ -29,6 +29,8 @@ describe("config categories", () => {
 		expect(configFileIncluded("workspace-mobile.json", ALL, "tezca-sync")).toBe(false);
 		expect(configFileIncluded("plugins/tezca-sync/data.json", ALL, "tezca-sync")).toBe(false);
 		expect(configFileIncluded("plugins/tezca-sync/main.js", ALL, "tezca-sync")).toBe(false);
+		expect(configFileIncluded("plugins/obsidian42-brat/data.json", ALL, "tezca-sync")).toBe(false);
+		expect(configFileIncluded("plugins/obsidian42-brat/main.js", ALL, "tezca-sync")).toBe(true);
 		expect(configFileIncluded("plugins/x/node_modules/y.js", ALL, "tezca-sync")).toBe(false);
 	});
 });

@@ -20,6 +20,14 @@ export const NO_CONFIG: ConfigCategories = { core: false, appearance: false, hot
 const ALWAYS_EXCLUDED = /^(workspace[^/]*\.json|workspaces\.json|cache|.*\.tmp)$/;
 
 /**
+ * Plugins whose settings describe this device rather than the vault, so their data.json stays
+ * put even with plugin settings syncing. BRAT's list is of the beta plugins installed here: one
+ * device's list replacing another's would drop plugins from it (including Tezca itself, which
+ * never syncs its own code).
+ */
+const DEVICE_SETTINGS = new Set(["obsidian42-brat"]);
+
+/**
  * Is `rel` (a path inside the config folder, e.g. "app.json" or "plugins/dataview/data.json")
  * synced under these categories? `ownPluginId` is never synced.
  */
@@ -37,7 +45,7 @@ export function configFileIncluded(rel: string, c: ConfigCategories, ownPluginId
 	if (parts[0] === "themes" || parts[0] === "snippets") return c.appearance;
 	if (parts[0] === "plugins" && parts.length === 3) {
 		if (parts[1] === ownPluginId) return false;
-		if (parts[2] === "data.json") return c.plugins;
+		if (parts[2] === "data.json") return c.plugins && !DEVICE_SETTINGS.has(parts[1]);
 		if (parts[2] === "main.js" || parts[2] === "manifest.json" || parts[2] === "styles.css") return c.pluginCode;
 	}
 	return false;
