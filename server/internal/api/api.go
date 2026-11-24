@@ -30,6 +30,10 @@ const (
 	DefaultMaxBlob  = 100 << 20
 	DefaultGuestMB  = 1024 // TEZCA_GUEST_QUOTA_MB
 	MaxSkew         = 300  // seconds
+	// DefaultBodyTimeout bounds reading a JSON request body; DefaultBlobIdleTimeout bounds each
+	// wait for more of a blob upload's body (an upload may take as long as it keeps moving).
+	DefaultBodyTimeout     = 30 * time.Second
+	DefaultBlobIdleTimeout = 60 * time.Second
 	PairingTTL      = 15 * time.Minute
 	DefaultInvite   = 7 * 24 * time.Hour
 	MaxInvite       = 30 * 24 * time.Hour
@@ -59,6 +63,9 @@ type Config struct {
 	GuestQuotaBytes int64
 
 	Notify Notifier // live sessions (the ws Hub); optional
+
+	BodyTimeout     time.Duration // default DefaultBodyTimeout
+	BlobIdleTimeout time.Duration // default DefaultBlobIdleTimeout
 }
 
 // Notifier reaches live WebSocket sessions after a membership or key change.
@@ -86,6 +93,12 @@ func New(cfg Config) *API {
 	}
 	if cfg.MaxBlobBytes <= 0 {
 		cfg.MaxBlobBytes = DefaultMaxBlob
+	}
+	if cfg.BodyTimeout <= 0 {
+		cfg.BodyTimeout = DefaultBodyTimeout
+	}
+	if cfg.BlobIdleTimeout <= 0 {
+		cfg.BlobIdleTimeout = DefaultBlobIdleTimeout
 	}
 	cfg.PublicURL = strings.TrimRight(cfg.PublicURL, "/")
 	if !ValidPluginRepo(cfg.PluginRepo) {
@@ -129,8 +142,9 @@ func New(cfg Config) *API {
 }
 
 // ServeHTTP adds permissive CORS to /api/* (auth is by signature, never cookies) and answers
-// preflight requests, then dispatches.
+// preflight requests, bounds how long reading a request body may take, then dispatches.
 func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	a.limitBodyRead(w, r)
 	if strings.HasPrefix(r.URL.Path, "/api/") {
 		h := w.Header()
 		h.Set("Access-Control-Allow-Origin", "*")
@@ -143,6 +157,56 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	a.mux.ServeHTTP(w, r)
+}
+
+// limitBodyRead sets a read deadline for requests with a body, so a client can't hold a
+// connection open by sending its body slowly. The server has no global ReadTimeout because that
+// would also cut off large blob uploads; instead a blob PUT gets an idle deadline that moves
+// forward whenever more of the body arrives, and every other body must arrive within
+// BodyTimeout. The deadline is cleared once the body has been read: left in place it would
+// cancel the request's context while a long response (a blob download) is still being written.
+func (a *API) limitBodyRead(w http.ResponseWriter, r *http.Request) {
+	if r.Body == nil || r.Body == http.NoBody || r.Method == http.MethodGet || r.Method == http.MethodHead {
+		return
+	}
+	rc := http.NewResponseController(w)
+	b := &deadlineBody{ReadCloser: r.Body, rc: rc}
+	d := a.cfg.BodyTimeout
+	if r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/blobs/") {
+		b.idle = a.cfg.BlobIdleTimeout
+		d = b.idle
+	}
+	// Set up front too: a handler that fails before reading leaves the server to drain the body.
+	if rc.SetReadDeadline(time.Now().Add(d)) != nil {
+		return // not supported by this ResponseWriter
+	}
+	r.Body = b
+}
+
+// deadlineBody clears the connection's read deadline when the body has been read to the end.
+// With idle > 0 it also pushes the deadline idle into the future before every read.
+type deadlineBody struct {
+	io.ReadCloser
+	rc   *http.ResponseController
+	idle time.Duration
+	done bool
+}
+
+func (b *deadlineBody) Read(p []byte) (int, error) {
+	if b.done {
+		return b.ReadCloser.Read(p)
+	}
+	if b.idle > 0 {
+		b.rc.SetReadDeadline(time.Now().Add(b.idle))
+	}
+	n, err := b.ReadCloser.Read(p)
+	if err == io.EOF {
+		b.done = true
+		b.rc.SetReadDeadline(time.Time{})
+	}
+	// On any other error (a timeout, a too-large body) the deadline stays, so the server's own
+	// attempt to drain the rest of the body after the handler can't block either.
+	return n, err
 }
 
 // PublicURL returns the configured public URL or one derived from the request.

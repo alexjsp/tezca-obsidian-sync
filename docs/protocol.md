@@ -105,6 +105,10 @@ skewed signature, or unknown user), 403 (not admin, wrong claim code, or not a m
 pairing), 409 (already claimed, invite redeemed by another key, last owner, key set doesn't match), 410 (invite expired or revoked) or
 413 (too large).
 
+Request bodies have read deadlines: a JSON body must arrive within 30 s, and a blob upload may take
+as long as it keeps moving, but a pause of more than 60 s ends it. The connection is closed when a
+deadline passes.
+
 JSON byte fields are `b64u`. HTTP sig header:
 `Authorization: Tezca pk=<b64u sign_pk>, ts=<unix seconds>, sig=<b64u>` with ±300 s skew allowed.
 `path_with_query` is the request URI as sent, e.g. `/api/invites`.
