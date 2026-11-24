@@ -15,7 +15,7 @@ You need two things: the **Tezca server** running somewhere your devices can rea
 
 ### 1. Run the server
 
-**On Unraid:** on the **Docker** tab, add `https://github.com/alexjsp/tezca-obsidian-sync` under **Template repositories** and save. Then choose **Add Container**, pick **Tezca** from the template list, and set **Public URL** to the address your devices will use, for example `https://notes.example.com`. (Once Tezca is in Community Applications, you'll be able to install it from the **Apps** tab instead.)
+**On Unraid:** on the **Docker** tab, add `https://github.com/alexjsp/unraid-community-apps` under **Template repositories** and save. Then choose **Add Container**, pick **Tezca** from the template list, and set **Public URL** to the address your devices will use, for example `https://notes.example.com`. (Once Tezca is in Community Applications, you'll be able to install it from the **Apps** tab instead.)
 
 **With Docker anywhere else:**
 

@@ -1,6 +1,6 @@
 # Publishes the server image to GitHub Container Registry for each release
 # (ghcr.io/<owner>/tezca-server:<version> and :latest), for amd64 and arm64.
-# The Unraid template (unraid/tezca.xml) uses it.
+# The Unraid template (in alexjsp/unraid-community-apps) uses it.
 name: Server image
 
 on:

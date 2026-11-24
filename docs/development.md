@@ -10,7 +10,6 @@
 | [`sim/`](../sim/) | Headless multi-client simulator against the real server |
 | [`e2e/`](../e2e/) | End-to-end tests in real Obsidian ([README](../e2e/README.md)) |
 | [`deploy/`](../deploy/) | Dockerfile and compose recipes |
-| [`unraid/`](../unraid/) | Unraid Community Applications template |
 | [`docs/`](.) | [research](research.md), [plan](plan.md), [protocol](protocol.md) |
 
 Commands use [just](https://github.com/casey/just) and pnpm (`just` lists them).
@@ -44,4 +43,4 @@ This runs the tests, bumps the plugin version, builds, commits, pushes and creat
 
 ## Deploying your own build to Unraid
 
-`just deploy-unraid` builds the server on the Unraid box and restarts it, from a local `.env` (copy `.env.example`). The [Unraid template](../unraid/tezca.xml) is the way for everyone else.
+`just deploy-unraid` builds the server on the Unraid box and restarts it, from a local `.env` (copy `.env.example`). The [Unraid template](https://github.com/alexjsp/unraid-community-apps/blob/main/templates/tezca.xml) is the way for everyone else.
