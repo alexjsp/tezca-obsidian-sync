@@ -98,6 +98,28 @@ describe("shared folders (real server)", () => {
 		await eventually(() => text(v, "Docs/x.md") === "owner edit", 10_000, "owner edit reaches viewer");
 	});
 
+	it("a share can't be mounted in a hidden folder, whatever its owner names it", async () => {
+		const alex = await claimAdmin(server, "Alex");
+		const sam = await inviteMember(server, alex, "Sam");
+		const a = await device(alex, "a", { "Evil/plugins/x/main.js": "code" });
+		const spaceId = await a.engine.shareFolder("Evil", ".obsidian");
+		await eventually(() => a.engine.shares.has(spaceId), 10_000, "mounted");
+		await idle(a);
+		const s = await device(sam, "s");
+		const link = await a.engine.createInvite(spaceId, "editor");
+		const u = new URL(link.replace("/invite#", "/invite?"));
+		let suggested = "";
+		await expect(
+			s.engine.joinShare(u.searchParams.get("token")!, u.searchParams.get("k")!, async (n) => {
+				suggested = n;
+				return ".obsidian";
+			}),
+		).rejects.toThrow(/hidden/);
+		expect(suggested).toBe("obsidian"); // the suggestion is already made safe
+		expect(s.engine.mounts!.all()).toEqual([]);
+		expect([...s.vault.files.keys()].some((p) => p.startsWith(".obsidian/"))).toBe(false);
+	});
+
 	it("recommended plugins: set by members who can edit, seen by everyone who joins", async () => {
 		const alex = await claimAdmin(server, "Alex");
 		const vic = await inviteMember(server, alex, "Vic");

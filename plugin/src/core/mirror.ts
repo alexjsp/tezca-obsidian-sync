@@ -201,6 +201,12 @@ export class DiskMirror {
 			return kind === "file" ? cfg.file(inner) : cfg.folder(inner);
 		}
 		if (rel.split("/").some((seg) => seg.startsWith("."))) return false;
+		// A share's own files: the whole vault path must be ordinary too (never inside a hidden
+		// folder such as the config folder), and no backslashes or control characters, which
+		// Obsidian would turn into other paths.
+		// eslint-disable-next-line no-control-regex
+		if (/[\\\x00-\x1f\x7f]/.test(rel)) return false;
+		if (this.opts.mount && vaultPath.split("/").some((seg) => seg.startsWith("."))) return false;
 		if (this.localOnly.has(vaultPath)) return false;
 		if (this.opts.excluded?.().some((m) => vaultPath === m || vaultPath.startsWith(m + "/"))) return false;
 		if (kind === "file") return fileKind(rel) !== "blob" || this.opts.blobs !== undefined;

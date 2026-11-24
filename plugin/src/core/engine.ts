@@ -7,7 +7,7 @@ import { HostConnection, type ConnStatus, type WSCtor } from "./connection";
 import { fromB64u, newSpaceKey, randomBytes, unwrapInvite, wrapForInvite, wrapKey, b64u, type Identity } from "./crypto";
 import { anyConfig, configFileIncluded, configFolderIncluded, type ConfigCategories } from "./config-sync";
 import { DEFAULT_MAX_BLOB_BYTES, DiskMirror, LOCAL_ORIGIN, type MirrorNotice } from "./mirror";
-import { Mounts, within, type Mount } from "./mounts";
+import { Mounts, mountPathProblem, safeFolderName, within, type Mount } from "./mounts";
 import { HostApi, ShareApi, createSpace, fetchHttp, listSpaces, normalizeHost, waitOnline, type HttpFn, type ShareRole } from "./setup";
 import { SpaceSync } from "./space";
 import type { LocalStore } from "./store";
@@ -461,7 +461,15 @@ export class SyncEngine {
 			for (const m of this.mounts.all()) {
 				if (!within(m.path, e.oldPath)) continue;
 				this.shares.get(m.spaceId)?.mirror.suspend();
-				this.mounts.set(m.spaceId, e.path + m.path.slice(e.oldPath.length), LOCAL_ORIGIN);
+				const to = e.path + m.path.slice(e.oldPath.length);
+				try {
+					this.mounts.set(m.spaceId, to, LOCAL_ORIGIN);
+				} catch (err) {
+					// Moved somewhere a shared folder can't live (e.g. into another shared folder):
+					// it stops being mounted here; its files stay where they were moved.
+					this.mounts.remove(m.spaceId, LOCAL_ORIGIN);
+					this.notices.emit({ kind: "preserved", message: `${(err as Error).message} The shared folder was removed from this vault; open its invite again to re-add it.`, paths: [to] });
+				}
 			}
 		} else if (e.type === "delete") {
 			for (const m of this.mounts.all()) {
@@ -544,6 +552,8 @@ export class SyncEngine {
 		if (this.mounts.containing(folder)) throw new Error("This folder is already inside a shared folder");
 		if (this.mounts.all().some((m) => within(m.path, folder))) throw new Error("This folder contains a shared folder");
 		if (!(await this.opts.vault.exists(folder))) throw new Error("Folder not found");
+		const problem = mountPathProblem(folder, this.mounts.all());
+		if (problem) throw new Error(problem);
 		const l = this.primary;
 		await waitOnline(l.conn, 15_000);
 		const info = await createSpace(l.conn, this.opts.identity, name, SpaceKind.SHARE);
@@ -584,8 +594,10 @@ export class SyncEngine {
 		if (this.mounts?.get(res.space_id)) return this.mounts.get(res.space_id)!.path; // already mounted
 		const info = l.infos.get(res.space_id);
 		const name = info ? new SpaceSync(l.conn, this.opts.store, this.opts.identity, info).meta?.name : undefined;
-		const path = await mountPath(name ?? "Shared");
+		const path = await mountPath(safeFolderName(name ?? "Shared"));
 		if (!path) return null;
+		const problem = mountPathProblem(path, this.mounts!.all());
+		if (problem) throw new Error(problem);
 		this.mounts!.set(res.space_id, path, LOCAL_ORIGIN, l === this.primary ? undefined : l.host);
 		return path;
 	}

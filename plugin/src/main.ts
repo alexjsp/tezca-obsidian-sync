@@ -24,6 +24,7 @@ import { DeletedFilesModal, HistoryModal } from "./obsidian/history-modal";
 import { ShareModal } from "./obsidian/share-modal";
 import { EditorBindings } from "./obsidian/editor";
 import { renderAvatar } from "./obsidian/avatar";
+import { mountPathProblem, safeFolderName } from "./core/mounts";
 import { PROFILE_COLORS, ProfileModal } from "./obsidian/profile-modal";
 import { PluginInstaller } from "./obsidian/plugin-installer";
 import { InstallRecommendedModal } from "./obsidian/recommended-plugins";
@@ -555,13 +556,25 @@ export default class TezcaPlugin extends Plugin {
 	}
 
 	private async askMountPath(shareName: string): Promise<string | null> {
-		let suggestion = shareName;
-		for (let i = 2; this.app.vault.getAbstractFileByPath(suggestion); i++) suggestion = `${shareName} ${i}`;
-		const v = await form(this.app, `Join "${shareName}"`, "Choose the folder in your vault where this shared folder will live.", [
-			{ key: "path", name: "Folder", value: suggestion },
-		], "Join");
-		const p = v?.path.trim().replace(/^\/+|\/+$/g, "");
-		return p ? p : null;
+		const base = safeFolderName(shareName);
+		let suggestion = base;
+		for (let i = 2; this.app.vault.getAbstractFileByPath(suggestion); i++) suggestion = `${base} ${i}`;
+		let problem = "";
+		for (;;) {
+			const v = await form(
+				this.app,
+				`Join "${base}"`,
+				`${problem ? `${problem} ` : ""}Choose the folder in your vault where this shared folder will live.`,
+				[{ key: "path", name: "Folder", value: suggestion }],
+				"Join",
+			);
+			const p = v?.path.trim().replace(/^\/+|\/+$/g, "");
+			if (!p) return null;
+			const why = mountPathProblem(p, this.engine?.mounts?.all() ?? []);
+			if (!why) return p;
+			problem = why;
+			suggestion = p;
+		}
 	}
 
 	// ───────────── setup flows ─────────────
