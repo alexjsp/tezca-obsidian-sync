@@ -152,6 +152,78 @@ export function seedFromRecoveryPhrase(phrase: string): Uint8Array {
 	return mnemonicToEntropy(norm, wordlist);
 }
 
+// ── Recovery key: the identity seed as one string, e.g. TZCA-ABCDE-FGHIJ-… ──
+// RFC 4648 Base32 (A–Z, 2–7) of seed ‖ a 2-byte checksum, in dash-separated groups of five
+// behind a TZCA- prefix: 34 bytes → 55 characters → 11 groups. Parsing forgives case, missing
+// or extra dashes and spaces, a missing prefix, and 0/1/8 typed for O/I/B. The checksum catches
+// typos instead of restoring a different (empty) account.
+
+const B32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+const RK_PREFIX = "TZCA";
+
+function recoveryChecksum(seed: Uint8Array): Uint8Array {
+	return blake2b256(utf8("tezca-recovery-key"), seed).slice(0, 2);
+}
+
+function base32(bytes: Uint8Array): string {
+	let out = "";
+	let bits = 0;
+	let value = 0;
+	for (const b of bytes) {
+		value = (value << 8) | b;
+		bits += 8;
+		while (bits >= 5) {
+			out += B32[(value >>> (bits - 5)) & 31];
+			bits -= 5;
+		}
+	}
+	if (bits > 0) out += B32[(value << (5 - bits)) & 31];
+	return out;
+}
+
+function fromBase32(s: string): Uint8Array {
+	const out: number[] = [];
+	let bits = 0;
+	let value = 0;
+	for (const ch of s) {
+		const v = B32.indexOf(ch);
+		if (v < 0) throw new Error("Invalid recovery key");
+		value = ((value << 5) | v) & 0xffff;
+		bits += 5;
+		if (bits >= 8) {
+			out.push((value >>> (bits - 8)) & 0xff);
+			bits -= 8;
+		}
+	}
+	return new Uint8Array(out);
+}
+
+/** The identity seed as a recovery key: TZCA-XXXXX-XXXXX-… (11 groups). */
+export function recoveryKey(seed: Uint8Array): string {
+	const chars = base32(concat(seed, recoveryChecksum(seed)));
+	return [RK_PREFIX, ...(chars.match(/.{1,5}/g) ?? [])].join("-");
+}
+
+/** The seed from a recovery key (lenient about formatting; throws on typos). */
+export function seedFromRecoveryKey(key: string): Uint8Array {
+	let s = key.toUpperCase().replace(/[^A-Z0-9]/g, "");
+	if (s.startsWith(RK_PREFIX)) s = s.slice(RK_PREFIX.length);
+	s = s.replace(/0/g, "O").replace(/1/g, "I").replace(/8/g, "B");
+	if (s.length !== 55) throw new Error("A recovery key has 55 characters after TZCA-; check you have all of it.");
+	const bytes = fromBase32(s);
+	const seed = bytes.slice(0, 32);
+	const sum = bytes.slice(32, 34);
+	if (!bytesEqual(sum, recoveryChecksum(seed))) throw new Error("That recovery key has a typo somewhere; check it character by character.");
+	return seed;
+}
+
+/** The seed from a recovery key, or from a 24-word recovery phrase (older setups). */
+export function seedFromRecovery(input: string): Uint8Array {
+	const words = input.trim().split(/\s+/);
+	if (words.length >= 12 && words.every((w) => /^[a-z]+$/i.test(w))) return seedFromRecoveryPhrase(input);
+	return seedFromRecoveryKey(input);
+}
+
 export function sign(id: Identity, msg: Uint8Array): Uint8Array {
 	return s().crypto_sign_detached(msg, id.signSk);
 }

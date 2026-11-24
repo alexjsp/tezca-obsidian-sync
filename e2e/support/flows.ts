@@ -20,7 +20,7 @@ export async function confirmLinkPrompt(d: Device) {
 /** Claim a fresh host from `d` (becomes its admin, with a new synced vault). */
 export async function claimHost(d: Device, server: TezcaServer, opts: { checkCopy?: boolean } = {}) {
 	await pasteSetupLink(d, server.claimLink);
-	await d.ackRecoveryPhrase(opts.checkCopy);
+	await d.ackRecoveryKey(opts.checkCopy);
 	await waitConfigured(d);
 	await d.closeSettings();
 	await d.waitSynced();
@@ -50,7 +50,7 @@ export async function inviteToHost(admin: Device, member: Device) {
 	// Host invites are the host's invite page with the deep link in the fragment, pasted as is.
 	if (!/^https?:\/\/[^#]+\/invite#do=join&host=[^&]+&token=[^&]+$/.test(link)) throw new Error(`unexpected host invite link: ${link}`);
 	await pasteSetupLink(member, link);
-	await member.ackRecoveryPhrase();
+	await member.ackRecoveryKey();
 	await waitConfigured(member);
 	await member.closeSettings();
 	await member.waitSynced();

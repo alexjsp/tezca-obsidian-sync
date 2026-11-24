@@ -1,4 +1,4 @@
-// The other ways in and out: restoring with the recovery phrase, a second synced vault for the
+// The other ways in and out: restoring with the recovery key, a second synced vault for the
 // same person, and disconnecting a vault.
 import assert from "node:assert/strict";
 import { Device } from "../support/device";
@@ -8,7 +8,7 @@ import { TezcaServer } from "../support/server";
 import { listFiles, waitConverged } from "../support/vault";
 import { sleep, waitFor } from "../support/wait";
 
-describe("setup: recovery phrase, second vault, disconnect", function () {
+describe("setup: recovery key, second vault, disconnect", function () {
 	let server: TezcaServer;
 	let mac: Device;
 	let restored: Device;
@@ -22,7 +22,7 @@ describe("setup: recovery phrase, second vault, disconnect", function () {
 			Device.launch("new-laptop", { vault: resolve(import.meta.dirname, "..", "vaults", "fresh") }),
 			Device.launch("other-vault", { mobile: true }),
 		]);
-		// Also checks "Copy recovery phrase" works from the Settings window, where setup happens.
+		// Also checks "Copy recovery key" works from the Settings window, where setup happens.
 		await claimHost(mac, server, { checkCopy: true });
 		await mac.write("Notes/Important.md", "Don't lose me.\n");
 		await mac.waitSynced();
@@ -43,20 +43,19 @@ describe("setup: recovery phrase, second vault, disconnect", function () {
 		assert.ok(!(await restored.modalTitles()).some((t) => t.includes("Welcome")));
 	});
 
-	it("restores access on a new device from the recovery phrase", async function () {
+	it("restores access on a new device from the recovery key", async function () {
 		await mac.command("tezca-sync:show-recovery-phrase");
-		await mac.choose("Show recovery phrase?", "Show");
-		const m = await mac.modal("Your recovery phrase");
-		const words: string[] = [];
-		for (const w of await m.$$(".tezca-phrase > div")) words.push((await w.getText()).replace(/^\d+\.\s*/, ""));
-		assert.equal(words.length, 24);
+		await mac.choose("Show recovery key?", "Show");
+		const m = await mac.modal("Your recovery key");
+		const key = (await m.$(".tezca-recovery-key").getText()).replace(/\s+/g, "");
+		assert.match(key, /^TZCA(-[A-Z2-7]{5}){11}$/);
 		await mac.closeModals();
 
 		await restored.openSettings();
 		await restored.clickButton("Restore");
-		const form = await restored.modal("Restore with recovery phrase");
+		const form = await restored.modal("Restore with your recovery key");
 		await (await form.$("input[type=text]")).setValue(server.url);
-		await (await form.$("textarea")).setValue(words.join(" "));
+		await (await form.$("textarea")).setValue(key.toLowerCase()); // forgiving about case
 		await restored.clickButton("Continue", form);
 		const vaultName = await mac.exec(({ app }) => app.vault.getName());
 		await restored.choose("Choose a synced vault", vaultName);

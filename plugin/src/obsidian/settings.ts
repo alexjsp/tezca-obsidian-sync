@@ -56,7 +56,7 @@ export class TezcaSettingTab extends PluginSettingTab {
 			new ButtonComponent(actions).setButtonText("Restore").onClick(() => void p.restoreFromPhrase());
 			body.createDiv({
 				cls: "tezca-hero-note",
-				text: "Paste a claim link from your new host, an invite link, or a pairing link from another of your devices. Restore uses your 24-word recovery phrase.",
+				text: "Paste a claim link from your new host, an invite link, or a pairing link from another of your devices. Restore uses your recovery key.",
 			});
 			heading(containerEl, "Your profile");
 			this.profileRow(containerEl);
@@ -102,9 +102,9 @@ export class TezcaSettingTab extends PluginSettingTab {
 			.setDesc("Connect a different Obsidian vault as its own synced vault, with the same identity.")
 			.addButton((b) => b.setButtonText("Create link").onClick(() => void p.pairDevice(true)));
 		new Setting(containerEl)
-			.setName("Recovery phrase")
-			.setDesc("Your 24-word key. The only way back in if you lose every device.")
-			.addButton((b) => b.setButtonText("Show").onClick(() => void p.showRecoveryPhrase()));
+			.setName("Recovery key")
+			.setDesc("The only way back in if you lose every device.")
+			.addButton((b) => b.setButtonText("Show").onClick(() => void p.showRecoveryKey()));
 
 		if (p.settings.hostRole === "admin") {
 			heading(containerEl, "People");

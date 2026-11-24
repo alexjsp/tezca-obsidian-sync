@@ -46,7 +46,7 @@ This works on iPhone, iPad and Android too.
 
 ### 4. Connect your vault
 
-Open the claim link on the device with your vault and press **Open in Obsidian**, or copy it into **Settings → Tezca Sync → Paste link**. Tezca shows your **recovery phrase**: 24 words that are the only way back in if you lose all your devices. Copy it somewhere safe.
+Open the claim link on the device with your vault and press **Open in Obsidian**, or copy it into **Settings → Tezca Sync → Paste link**. Tezca shows your **recovery key** (`TZCA-…`): the only way back in if you lose all your devices. Save it in your password manager, or write it down.
 
 ### 5. Add your other devices
 
@@ -64,7 +64,7 @@ Right-click a folder and choose **Share folder…**, then create an invite link 
 ## Your data
 
 - **Backups:** everything the server keeps is in its `/data` folder (`/mnt/user/appdata/tezca` on Unraid). It's all encrypted, so back it up like any other folder.
-- **Recovery phrase:** without it, a server backup can't be decrypted. Keep it safe, and away from the server.
+- **Recovery key:** without it, a server backup can't be decrypted. Keep it safe, and away from the server.
 - **If something goes wrong:** open a note's **Version history** (right-click the file) to restore any point in the last 30 days, or run **Tezca Sync: Show recently deleted files** from the command palette. Before sync overwrites or removes a lot of a file, Tezca also keeps a copy in the hidden `.tezca-backup` folder of your vault for 30 days.
 
 ## Learn more

@@ -78,37 +78,39 @@ export class LinkModal extends Modal {
 	}
 }
 
-/** Displays the recovery phrase and requires acknowledgement. */
-export class RecoveryPhraseModal extends Modal {
+/** Displays the recovery key and requires acknowledgement. */
+export class RecoveryKeyModal extends Modal {
 	constructor(
 		app: App,
-		private readonly phrase: string,
+		private readonly key: string,
 		private readonly onDone: () => void = () => undefined,
 	) {
 		super(app);
 	}
 	onOpen() {
 		const { contentEl } = this;
-		this.setTitle("Your recovery phrase");
+		this.setTitle("Your recovery key");
 		contentEl.createEl("p", {
-			text: "Everything you sync is end-to-end encrypted. These 24 words are the only way to restore access if you lose all of your devices. Write them down and keep them somewhere safe. Tezca cannot recover them for you.",
+			text: "Everything you sync is end-to-end encrypted. This key is the only way back in if you lose all of your devices. Save it in your password manager, or write it down and keep it somewhere safe. Tezca can't recover it for you.",
 		});
-		const grid = contentEl.createDiv({ cls: "tezca-phrase" });
-		this.phrase.split(" ").forEach((w, i) => grid.createDiv({ text: `${i + 1}. ${w}` }));
+		// Three groups per line; copying always gives the single-line key.
+		const groups = this.key.split("-");
+		const box = contentEl.createDiv({ cls: "tezca-recovery-key", attr: { "aria-label": `Recovery key ${groups.join(", ")}` } });
+		for (let i = 0; i < groups.length; i += 3) box.createDiv({ text: groups.slice(i, i + 3).join("-") + (i + 3 < groups.length ? "-" : "") });
 		const copy = contentEl.createEl("button", { cls: "tezca-copy-phrase" });
 		const icon = copy.createSpan({ cls: "tezca-copy-icon" });
 		setIcon(icon, "copy");
-		const label = copy.createSpan({ text: "Copy recovery phrase" });
+		const label = copy.createSpan({ text: "Copy recovery key" });
 		copy.onclick = async () => {
-			if (await copyText(this.phrase, contentEl)) {
+			if (await copyText(this.key, contentEl)) {
 				setIcon(icon, "check");
 				label.setText("Copied. Paste it somewhere safe, then clear your clipboard.");
 				copy.addClass("is-copied");
-			} else new Notice("Couldn't copy. Select the words and copy them instead.");
+			} else new Notice("Couldn't copy. Select the key and copy it instead.");
 		};
 		let ack = false;
 		new Setting(contentEl)
-			.setName("I have saved my recovery phrase")
+			.setName("I have saved my recovery key")
 			.addToggle((t) => t.onChange((v) => (ack = v)));
 		new Setting(contentEl).addButton((b) =>
 			b
@@ -116,7 +118,7 @@ export class RecoveryPhraseModal extends Modal {
 				.setCta()
 				.onClick(() => {
 					if (!ack) {
-						new Notice("Please confirm you've saved the phrase first.");
+						new Notice("Please confirm you've saved the key first.");
 						return;
 					}
 					this.close();

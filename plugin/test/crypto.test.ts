@@ -60,3 +60,25 @@ describe("crypto", () => {
 		expect(() => openPairing(randomBytes(32), sealPairing(secret, p))).toThrow();
 	});
 });
+
+describe("recovery key", () => {
+	it("round-trips, forgives formatting, and catches typos", async () => {
+		const { recoveryKey, seedFromRecoveryKey, seedFromRecovery, recoveryPhrase: phrase } = await import("../src/core/crypto");
+		const seed = new Uint8Array(32).map((_, i) => (i * 37 + 11) & 0xff);
+		const key = recoveryKey(seed);
+		expect(key).toMatch(/^TZCA(-[A-Z2-7]{5}){11}$/);
+		expect(hex(seedFromRecoveryKey(key))).toBe(hex(seed));
+		// Lower case, no dashes, spaces, no prefix, 0/1/8 for O/I/B.
+		const sloppy = key.toLowerCase().replace(/-/g, " ").replace(/^tzca /, "").replace(/o/g, "0").replace(/i/g, "1").replace(/b/g, "8");
+		expect(hex(seedFromRecoveryKey(sloppy))).toBe(hex(seed));
+		// One character wrong: rejected, not a different account.
+		const chars = key.split("");
+		const at = chars.findIndex((c, i) => i > 5 && /[A-Z]/.test(c));
+		chars[at] = chars[at] === "A" ? "B" : "A";
+		expect(() => seedFromRecoveryKey(chars.join(""))).toThrow(/typo/);
+		expect(() => seedFromRecoveryKey("TZCA-ABCDE")).toThrow(/55 characters/);
+		// Old 24-word phrases still restore.
+		expect(hex(seedFromRecovery(phrase(seed)))).toBe(hex(seed));
+		expect(hex(seedFromRecovery(key))).toBe(hex(seed));
+	});
+});

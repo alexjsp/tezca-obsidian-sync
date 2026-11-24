@@ -8,8 +8,8 @@ import {
 	initCrypto,
 	newIdentity,
 	randomBytes,
-	recoveryPhrase,
-	seedFromRecoveryPhrase,
+	recoveryKey,
+	seedFromRecovery,
 	hex,
 	type Identity,
 } from "./core/crypto";
@@ -28,7 +28,7 @@ import { mountPathProblem, safeFolderName } from "./core/mounts";
 import { PROFILE_COLORS, ProfileModal } from "./obsidian/profile-modal";
 import { PluginInstaller } from "./obsidian/plugin-installer";
 import { InstallRecommendedModal } from "./obsidian/recommended-plugins";
-import { LinkModal, RecoveryPhraseModal, choose, confirm, form } from "./obsidian/modals";
+import { LinkModal, RecoveryKeyModal, choose, confirm, form } from "./obsidian/modals";
 import { TezcaSettingTab } from "./obsidian/settings";
 import { ObsidianVault } from "./obsidian/vault-adapter";
 
@@ -151,7 +151,7 @@ export default class TezcaPlugin extends Plugin {
 				new Notice("Tezca: restoring missing files…");
 			},
 		});
-		this.addCommand({ id: "show-recovery-phrase", name: "Show recovery phrase", callback: () => void this.showRecoveryPhrase() });
+		this.addCommand({ id: "show-recovery-phrase", name: "Show recovery key", callback: () => void this.showRecoveryKey() });
 		this.addCommand({
 			id: "file-history",
 			name: "Show version history of the current file",
@@ -345,7 +345,7 @@ export default class TezcaPlugin extends Plugin {
 		if (!this.isConfigured) return this.renderStatus();
 		this.identity = await this.loadIdentity();
 		if (!this.identity) {
-			new Notice("Tezca: this device's identity key is missing. Re-pair it or restore from your recovery phrase in settings.", 10000);
+			new Notice("Tezca: this device's identity key is missing. Re-pair it or restore with your recovery key in settings.", 10000);
 			return this.renderStatus();
 		}
 		this.vaultStore = await IdbStore.open(`tezca-vault-${this.settings.deviceId}`);
@@ -517,7 +517,7 @@ export default class TezcaPlugin extends Plugin {
 		if (!ok) return;
 		const id = newIdentity();
 		await new ShareApi(this.api(host), id).redeemAsGuest(token);
-		await new Promise<void>((resolve) => new RecoveryPhraseModal(this.app, recoveryPhrase(id.seed), resolve).open());
+		await new Promise<void>((resolve) => new RecoveryKeyModal(this.app, recoveryKey(id.seed), resolve).open());
 		const conn = new HostConnection({ host, identity: id, deviceId: this.settings.deviceId, clientVersion: this.manifest.version });
 		conn.start();
 		try {
@@ -618,7 +618,7 @@ export default class TezcaPlugin extends Plugin {
 		let [title, message, ok] = texts;
 		if (action === "share" && !this.isConfigured) return true; // the guest flow asks, with more detail
 		if (action !== "share" && this.isConfigured)
-			message += ` This vault is currently connected to ${hostName(this.settings.host)}: continuing disconnects it there (your files stay). Make sure you have that account's recovery phrase.`;
+			message += ` This vault is currently connected to ${hostName(this.settings.host)}: continuing disconnects it there (your files stay). Make sure you have that account's recovery key.`;
 		if (!isSecureHost(host)) {
 			message += ` Warning: ${where} doesn't use HTTPS, so anyone on the network between you could read or change what's sent, including the keys that unlock your notes.`;
 			ok = `${ok} without HTTPS`;
@@ -652,7 +652,7 @@ export default class TezcaPlugin extends Plugin {
 	}
 
 	private async finishNewIdentity(host: string, id: Identity, role: string) {
-		await new Promise<void>((resolve) => new RecoveryPhraseModal(this.app, recoveryPhrase(id.seed), resolve).open());
+		await new Promise<void>((resolve) => new RecoveryKeyModal(this.app, recoveryKey(id.seed), resolve).open());
 		await this.connectSpace(normalizeHost(host), id, role);
 	}
 
@@ -707,17 +707,17 @@ export default class TezcaPlugin extends Plugin {
 	async restoreFromPhrase() {
 		const v = await form(
 			this.app,
-			"Restore with recovery phrase",
-			"Connect this vault using your 24-word recovery phrase.",
+			"Restore with your recovery key",
+			"Connect this vault with your recovery key (TZCA-…) and your host's address. A 24-word recovery phrase from an older version works too.",
 			[
 				{ key: "host", name: "Host URL", placeholder: "https://sync.example.com", value: this.settings.host },
-				{ key: "phrase", name: "Recovery phrase", multiline: true },
+				{ key: "phrase", name: "Recovery key", placeholder: "TZCA-…", multiline: true },
 			],
 		);
 		if (!v) return;
 		try {
 			if (!(await this.confirmReplace())) return;
-			const id = identityFromSeed(seedFromRecoveryPhrase(v.phrase));
+			const id = identityFromSeed(seedFromRecovery(v.phrase));
 			await this.connectSpace(normalizeHost(v.host), id, "member");
 		} catch (e) {
 			new Notice(`Tezca: ${(e as Error).message}`, 10000);
@@ -777,15 +777,15 @@ export default class TezcaPlugin extends Plugin {
 		}
 	}
 
-	async showRecoveryPhrase() {
+	async showRecoveryKey() {
 		const id = this.identity ?? (await this.loadIdentity());
 		if (!id) return new Notice("Tezca: no identity on this device.");
-		if (!(await confirm(this.app, "Show recovery phrase?", "Make sure nobody can see your screen.", "Show"))) return;
-		new RecoveryPhraseModal(this.app, recoveryPhrase(id.seed)).open();
+		if (!(await confirm(this.app, "Show recovery key?", "Make sure nobody can see your screen.", "Show"))) return;
+		new RecoveryKeyModal(this.app, recoveryKey(id.seed)).open();
 	}
 
 	async disconnect() {
-		if (!(await confirm(this.app, "Disconnect this vault?", "Sync stops on this device. Your files stay as they are. You can reconnect later with a pairing link or your recovery phrase.", "Disconnect"))) return;
+		if (!(await confirm(this.app, "Disconnect this vault?", "Sync stops on this device. Your files stay as they are. You can reconnect later with a pairing link or your recovery key.", "Disconnect"))) return;
 		await this.stopEngine();
 		this.settings.spaceId = "";
 		this.settings.host = "";
