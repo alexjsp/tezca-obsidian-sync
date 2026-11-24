@@ -351,3 +351,8 @@ Flushing the view before writing didn't reliably help (and risks writing a stale
 The fix is to treat an open Canvas like an open Markdown editor: apply remote changes through the view
 (`canvas.importData`/per-node updates) and take local changes from the view's data, not the file. Test:
 `E2E_KNOWN_ISSUES=1 just e2e canvas`.
+
+Decision (2026-11-24): if a host admin removes the only owner of a shared folder, the folder keeps
+working for its members but nobody can manage it (roles, invites, key rotation). Accepted: letting
+the server or a member take ownership would need devices to trust an owner nobody they trust
+vouched for, which is the hole the key-commitment scheme closes.
