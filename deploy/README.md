@@ -35,12 +35,17 @@ the QR code with your phone. After the claim, the link stops working. Keep the l
 you've claimed the server: anyone with the link can claim it first.
 
 Set `TEZCA_PUBLIC_URL` to the exact URL your devices use. It goes into claim and invite links.
+Without it, links are built from the request's `Host` header, and the server logs a warning at
+startup unless it only listens on loopback. Every recipe here sets it.
 
 ## Plain HTTP (`docker-compose.yml`)
 
 ```sh
 TEZCA_PUBLIC_URL=http://192.168.1.10:8080 docker compose up -d
 ```
+
+If a reverse proxy on the same host terminates TLS, add `TEZCA_BIND=127.0.0.1` so the plain-HTTP
+port only listens on loopback and can't be reached around the proxy.
 
 Use this only on a network you trust. Content is end-to-end encrypted, but plain HTTP still exposes
 metadata (who syncs which doc, and when) to anyone on the path. Obsidian mobile may also refuse
@@ -96,6 +101,19 @@ Cloudflare's Free and Pro plans reject request bodies over 100 MB, so set `TEZCA
 
 Cloudflare terminates TLS, so it sees the traffic. It still can't read your notes, because they're
 end-to-end encrypted, but it sees the same metadata the server does.
+
+## Hardening
+
+- **Client addresses behind a proxy:** per-address limits (WebSocket connections, failed claim and
+  invite attempts) use `X-Forwarded-For` from proxies in `TEZCA_TRUSTED_PROXIES`. The default trusts
+  loopback and private ranges, which suits every recipe here. If the server's port is reachable
+  from untrusted machines on those ranges, set it to your proxy's address.
+- **Connection caps:** `TEZCA_MAX_CONNS` (default 1000) and `TEZCA_MAX_CONNS_PER_IP` (default 50)
+  bound concurrent WebSocket connections. Raise the per-address cap if many people sync from behind
+  one NAT address.
+- **Rate limiting at the proxy:** the server limits failed attempts itself, but a proxy that rate
+  limits `/api/` requests per client (nginx `limit_req`, Caddy's rate-limit plugin, Cloudflare rules)
+  adds a cheap first line of defence.
 
 ## Operations
 

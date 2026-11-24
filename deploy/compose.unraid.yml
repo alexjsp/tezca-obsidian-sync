@@ -1,5 +1,8 @@
 # Unraid deployment, used by `just deploy-unraid` (scripts/deploy-unraid).
 # Plain HTTP on host port 8089; Nginx Proxy Manager terminates TLS for TEZCA_PUBLIC_URL.
+# NPM runs on another host, so the port is published on all interfaces. If your proxy runs on the
+# Unraid host itself, set TEZCA_BIND=127.0.0.1 (or the proxy network's address) so plain HTTP
+# isn't reachable beside TLS.
 services:
   tezca:
     build:
@@ -8,7 +11,7 @@ services:
     image: tezca-server:local
     restart: unless-stopped
     ports:
-      - "${TEZCA_PORT:-8089}:8080"
+      - "${TEZCA_BIND:-0.0.0.0}:${TEZCA_PORT:-8089}:8080"
     environment:
       TEZCA_PUBLIC_URL: ${TEZCA_PUBLIC_URL:?set TEZCA_PUBLIC_URL}
       TEZCA_SERVER_NAME: ${TEZCA_SERVER_NAME:-Tezca}

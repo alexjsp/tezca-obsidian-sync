@@ -18,7 +18,8 @@ services:
       - tezca-data:/data
 
   cloudflared:
-    image: cloudflare/cloudflared:latest
+    # Pinned: bump deliberately (https://github.com/cloudflare/cloudflared/releases).
+    image: cloudflare/cloudflared:2026.11.2
     restart: unless-stopped
     depends_on: [tezca]
     command: tunnel --no-autoupdate run
