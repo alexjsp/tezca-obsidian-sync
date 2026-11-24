@@ -1,4 +1,5 @@
-import { App, Notice, PluginSettingTab, Setting } from "obsidian";
+import { App, ButtonComponent, ExtraButtonComponent, Notice, PluginSettingTab, Setting, setIcon } from "obsidian";
+import { copyText } from "./modals";
 import { renderAvatar } from "./avatar";
 import type TezcaPlugin from "../main";
 import { ShareModal } from "./share-modal";
@@ -25,135 +26,218 @@ export class TezcaSettingTab extends PluginSettingTab {
 		this.nameEl?.setText(name);
 	}
 
+	private statusOff: (() => void) | null = null;
+
+	hide(): void {
+		this.statusOff?.();
+		this.statusOff = null;
+	}
+
 	display(): void {
 		const { containerEl } = this;
 		const p = this.plugin;
 		containerEl.empty();
+		containerEl.addClass("tezca-settings");
+		this.statusOff?.();
+		this.statusOff = null;
 
 		if (!p.isConfigured) {
-			containerEl.createEl("p", {
-				text: "Tezca syncs this vault live and end-to-end encrypted through a host you run yourself (a small Docker container).",
+			const hero = containerEl.createDiv({ cls: "tezca-hero tezca-hero-setup" });
+			const icon = hero.createDiv({ cls: "tezca-hero-icon" });
+			setIcon(icon, "tezca");
+			const body = hero.createDiv({ cls: "tezca-hero-body" });
+			body.createDiv({ cls: "tezca-hero-title", text: "Sync this vault with Tezca" });
+			body.createDiv({
+				cls: "tezca-hero-sub",
+				text: "Live, end-to-end encrypted sync through a host you run yourself. Your notes are only ever readable on your devices.",
 			});
-			new Setting(containerEl)
-				.setName("Set up with a link")
-				.setDesc("Paste a claim link (from your new host's setup page), an invite link, or a pairing link from another device. Opening the link directly on this device works too.")
-				.addButton((b) => b.setButtonText("Paste link").setCta().onClick(() => void p.setupFromLinkOrCode()));
-			new Setting(containerEl)
-				.setName("Restore with recovery phrase")
-				.setDesc("Connect using your 24-word recovery phrase and your host's URL.")
-				.addButton((b) => b.setButtonText("Restore").onClick(() => void p.restoreFromPhrase()));
-		} else {
-			const status = p.engine?.currentStatus();
-			new Setting(containerEl)
-				.setName("Status")
-				.setDesc(`${status?.conn ?? "stopped"} · host ${p.settings.host} · vault ${p.engine?.space?.meta?.name ?? p.settings.spaceId}`)
-				.addButton((b) => b.setButtonText("Reconnect").onClick(() => p.engine?.conn.reconnectNow()));
-			if (p.identityFingerprint())
-				containerEl.createEl("p", { cls: "setting-item-description", text: `Identity: ${p.identityFingerprint()}…` });
+			const actions = body.createDiv({ cls: "tezca-hero-actions" });
+			new ButtonComponent(actions).setButtonText("Paste link").setCta().onClick(() => void p.setupFromLinkOrCode());
+			new ButtonComponent(actions).setButtonText("Restore").onClick(() => void p.restoreFromPhrase());
+			body.createDiv({
+				cls: "tezca-hero-note",
+				text: "Paste a claim link from your new host, an invite link, or a pairing link from another of your devices. Restore uses your 24-word recovery phrase.",
+			});
+			heading(containerEl, "Your profile");
+			this.profileRow(containerEl);
+			return;
+		}
 
-			containerEl.createEl("h3", { text: "Devices" });
-			new Setting(containerEl)
-				.setName("Pair another device")
-				.setDesc("Shows a one-time QR code / link to connect another device to this vault.")
-				.addButton((b) => b.setButtonText("Pair device").setCta().onClick(() => void p.pairDevice()));
-			new Setting(containerEl)
-				.setName("Set up another synced vault")
-				.setDesc("Connect a different Obsidian vault as a separate synced vault with the same identity.")
-				.addButton((b) => b.setButtonText("Create link").onClick(() => void p.pairDevice(true)));
-			new Setting(containerEl)
-				.setName("Recovery phrase")
-				.setDesc("Your 24-word key. Needed if you lose every device.")
-				.addButton((b) => b.setButtonText("Show").onClick(() => void p.showRecoveryPhrase()));
-			if (p.settings.hostRole === "admin")
-				new Setting(containerEl)
-					.setName("Invite a member")
-					.setDesc("Create a one-time invite link so someone else can use this host.")
-					.addButton((b) => b.setButtonText("Create invite").onClick(() => void p.createInvite()));
+		// ── Account card: who you are, and the state of sync ──
+		const hero = containerEl.createDiv({ cls: "tezca-hero" });
+		this.avatarEl = hero.createSpan({ cls: "tezca-avatar tezca-avatar-hero" });
+		const body = hero.createDiv({ cls: "tezca-hero-body" });
+		this.nameEl = body.createDiv({ cls: "tezca-hero-title" });
+		const meta = body.createDiv({ cls: "tezca-hero-meta" });
+		const pill = meta.createSpan({ cls: "tezca-pill" });
+		meta.createSpan({ cls: "tezca-hero-chip", text: hostLabel(p.settings.host), attr: { title: p.settings.host } });
+		if (!p.engine?.isProfile) meta.createSpan({ cls: "tezca-hero-chip", text: `Vault: ${p.engine?.space?.meta?.name ?? this.app.vault.getName()}` });
+		else meta.createSpan({ cls: "tezca-hero-chip", text: "Guest" });
+		const renderPill = () => {
+			const [text, state] = statusLabel(p);
+			pill.empty();
+			pill.dataset.state = state;
+			pill.createSpan({ cls: "tezca-status-dot" });
+			pill.createSpan({ text });
+		};
+		renderPill();
+		const off = p.engine?.status.on(() => renderPill());
+		this.statusOff = off ?? null;
+		const heroActions = hero.createDiv({ cls: "tezca-hero-actions" });
+		new ButtonComponent(heroActions).setButtonText("Edit profile").onClick(() => p.editProfile(false));
+		new ExtraButtonComponent(heroActions)
+			.setIcon("refresh-cw")
+			.setTooltip("Reconnect")
+			.onClick(() => p.engine?.conn.reconnectNow());
+		this.refreshProfile();
 
-			containerEl.createEl("h3", { text: "Shared folders" });
-			const mounts = p.engine?.mounts?.all() ?? [];
-			if (p.engine?.isProfile)
-				containerEl.createEl("p", {
-					cls: "setting-item-description",
-					text: "You're using Tezca as a guest: only shared folders sync, and the rest of this vault stays on this device.",
-				});
-			if (!mounts.length)
-				containerEl.createEl("p", {
-					cls: "setting-item-description",
-					text: "None yet. Right-click a folder and choose \"Share folder…\" to share it with someone, or open an invite link to join one.",
-				});
-			for (const m of mounts) {
-				const sh = p.engine?.shares.get(m.spaceId);
-				const role = p.engine?.roleIn(m.spaceId);
+		// ── Devices ──
+		heading(containerEl, "Devices");
+		new Setting(containerEl)
+			.setName("Pair another device")
+			.setDesc("Show a one-time QR code and link that connects another device to this vault.")
+			.addButton((b) => b.setButtonText("Pair device").setCta().onClick(() => void p.pairDevice()));
+		new Setting(containerEl)
+			.setName("Another synced vault")
+			.setDesc("Connect a different Obsidian vault as its own synced vault, with the same identity.")
+			.addButton((b) => b.setButtonText("Create link").onClick(() => void p.pairDevice(true)));
+		new Setting(containerEl)
+			.setName("Recovery phrase")
+			.setDesc("Your 24-word key. The only way back in if you lose every device.")
+			.addButton((b) => b.setButtonText("Show").onClick(() => void p.showRecoveryPhrase()));
+
+		if (p.settings.hostRole === "admin") {
+			heading(containerEl, "People");
+			new Setting(containerEl)
+				.setName("Invite someone to this host")
+				.setDesc("They get their own private synced vaults here. The link works once.")
+				.addButton((b) => b.setButtonText("Create invite").onClick(() => void p.createInvite()));
+		}
+
+		// ── Shared folders ──
+		heading(containerEl, "Shared folders");
+		const mounts = p.engine?.mounts?.all() ?? [];
+		if (p.engine?.isProfile)
+			note(containerEl, "You're using Tezca as a guest: only shared folders sync, and the rest of this vault stays on this device.");
+		if (!mounts.length) note(containerEl, 'None yet. Right-click a folder and choose "Share folder…", or open an invite link to join one.');
+		for (const m of mounts) {
+			const sh = p.engine?.shares.get(m.spaceId);
+			const role = p.engine?.roleIn(m.spaceId);
+			const row = new Setting(containerEl).setClass("tezca-share-row");
+			const icon = row.nameEl.createSpan({ cls: "tezca-row-icon" });
+			setIcon(icon, "folder-sync");
+			row.nameEl.createSpan({ text: m.path });
+			if (role) row.nameEl.createSpan({ cls: `tezca-role tezca-role-${role}`, text: role[0].toUpperCase() + role.slice(1) });
+			const name = sh?.space.meta?.name;
+			row.setDesc(
+				sh
+					? [name && name !== m.path.split("/").pop() ? `Shared as "${name}"` : "", m.host ? `On ${hostLabel(m.host)}` : ""].filter(Boolean).join(" · ") || "Syncing"
+					: `Connecting…${m.host ? ` (${hostLabel(m.host)})` : ""}`,
+			);
+			row.addButton((b) =>
+				b
+					.setButtonText("Manage")
+					.setDisabled(!sh)
+					.onClick(() => new ShareModal(this.app, p.engine!, m.spaceId, p.installer).open()),
+			);
+		}
+
+		// ── Settings sync ──
+		if (!p.engine?.isProfile) {
+			heading(containerEl, "Settings sync", "Choose, per device, which parts of Obsidian's settings sync through your vault. Changes from other devices apply after reloading Obsidian. Workspace layout and Tezca's own settings never sync.");
+			const cats: [keyof typeof p.settings.configSync, string, string][] = [
+				["core", "Core settings", "Editor and app options, core plugins and their settings."],
+				["appearance", "Appearance", "Theme, themes and CSS snippets."],
+				["hotkeys", "Hotkeys", "Custom keyboard shortcuts."],
+				["plugins", "Community plugin list and settings", "Which plugins are on, and each plugin's settings."],
+				["pluginCode", "Community plugin code", "The plugins themselves, so one installed here appears on your other devices."],
+			];
+			for (const [key, name, desc] of cats)
 				new Setting(containerEl)
-					.setName(m.path)
-					.setDesc(
-						sh
-							? `${sh.space.meta?.name ?? ""}${role ? ` · you're ${role === "owner" ? "an owner" : `a${role === "editor" ? "n editor" : " viewer"}`}` : ""}${m.host ? ` · on ${m.host}` : ""}`
-							: `Connecting…${m.host ? ` (${m.host})` : ""}`,
-					)
-					.addButton((b) =>
-						b
-							.setButtonText("Manage")
-							.setDisabled(!sh)
-							.onClick(() => new ShareModal(this.app, p.engine!, m.spaceId, p.installer).open()),
+					.setName(name)
+					.setDesc(desc)
+					.addToggle((t) =>
+						t.setValue(p.settings.configSync[key]).onChange(async (v) => {
+							p.settings.configSync[key] = v;
+							await p.saveSettings();
+							await p.startEngine(); // re-scan with the new selection
+						}),
 					);
-			}
+		}
 
-			if (!p.engine?.isProfile) {
-				containerEl.createEl("h3", { text: "Settings sync" });
-				containerEl.createEl("p", {
-					cls: "setting-item-description",
-					text: "Sync parts of this vault's Obsidian settings (.obsidian) through your private vault. Choose per device; changes from other devices apply after reloading Obsidian. Workspace layout and Tezca's own settings never sync.",
-				});
-				const cats: [keyof typeof p.settings.configSync, string, string][] = [
-					["core", "Core settings", "Editor and app options, core plugins and their settings (daily notes, templates, …)."],
-					["appearance", "Appearance", "Theme choice, themes and CSS snippets."],
-					["hotkeys", "Hotkeys", "Custom keyboard shortcuts."],
-					["plugins", "Community plugin list and settings", "Which community plugins are enabled, and each plugin's settings."],
-					["pluginCode", "Community plugin code", "The plugins themselves, so a plugin installed on one device appears on the others."],
-				];
-				for (const [key, name, desc] of cats)
-					new Setting(containerEl)
-						.setName(name)
-						.setDesc(desc)
-						.addToggle((t) =>
-							t.setValue(p.settings.configSync[key]).onChange(async (v) => {
-								p.settings.configSync[key] = v;
-								await p.saveSettings();
-								await p.startEngine(); // re-scan with the new selection
-							}),
-						);
-			}
-
-			containerEl.createEl("h3", { text: "Presence" });
-			const prof = new Setting(containerEl).setName("Profile").setDesc("Your name, colour and picture, shown on your cursor and to the members of your shared folders.");
-			this.avatarEl = prof.controlEl.createSpan({ cls: "tezca-avatar tezca-avatar-large" });
-			this.nameEl = prof.controlEl.createSpan({ cls: "tezca-profile-name-label" });
-			this.refreshProfile();
-			prof.addButton((b) => b.setButtonText("Edit…").onClick(() => p.editProfile(false)));
-			new Setting(containerEl)
-				.setName("Device name")
-				.setDesc("Used in conflict file names.")
-				.addText((t) =>
-					t.setValue(p.settings.deviceName).onChange(async (v) => {
-						p.settings.deviceName = v.trim() || "Device";
-						await p.saveSettings();
-					}),
-				);
-
-			containerEl.createEl("h3", { text: "Advanced" });
-			new Setting(containerEl).setName("Debug logging").addToggle((t) =>
-				t.setValue(p.settings.debug).onChange(async (v) => {
-					p.settings.debug = v;
-					log.level = v ? "debug" : "info";
+		// ── This device ──
+		heading(containerEl, "This device");
+		new Setting(containerEl)
+			.setName("Device name")
+			.setDesc("Used in the names of conflict copies.")
+			.addText((t) =>
+				t.setValue(p.settings.deviceName).onChange(async (v) => {
+					p.settings.deviceName = v.trim() || "Device";
 					await p.saveSettings();
 				}),
 			);
-			new Setting(containerEl)
-				.setName("Disconnect this vault")
-				.setDesc("Stop syncing on this device. Files are kept.")
-				.addButton((b) => b.setButtonText("Disconnect").setWarning().onClick(() => void p.disconnect()));
+
+		// ── Advanced ──
+		heading(containerEl, "Advanced");
+		const fp = p.identityFingerprint();
+		if (fp) {
+			const idRow = new Setting(containerEl).setName("Identity key").setDesc("Identifies you to hosts and to the people you share with.");
+			idRow.controlEl.createEl("code", { cls: "tezca-key", text: fp.match(/.{1,4}/g)!.join(" ") });
+			idRow.addExtraButton((b) =>
+				b
+					.setIcon("copy")
+					.setTooltip("Copy")
+					.onClick(async () => new Notice((await copyText(fp, containerEl)) ? "Copied" : "Couldn't copy")),
+			);
 		}
+		new Setting(containerEl).setName("Debug logging").setDesc("More detail in the developer console, for reporting problems.").addToggle((t) =>
+			t.setValue(p.settings.debug).onChange(async (v) => {
+				p.settings.debug = v;
+				log.level = v ? "debug" : "info";
+				await p.saveSettings();
+			}),
+		);
+		new Setting(containerEl)
+			.setName("Disconnect this vault")
+			.setDesc("Stop syncing on this device. Your files stay as they are.")
+			.addButton((b) => b.setButtonText("Disconnect").setWarning().onClick(() => void p.disconnect()));
 	}
+
+	/** Profile row (before setup, where there's no account card). */
+	private profileRow(containerEl: HTMLElement) {
+		const prof = new Setting(containerEl).setName("Name, colour and picture").setDesc("Shown on your cursor and to the people you share folders with.");
+		this.avatarEl = prof.controlEl.createSpan({ cls: "tezca-avatar tezca-avatar-large" });
+		this.nameEl = prof.controlEl.createSpan({ cls: "tezca-profile-name-label" });
+		this.refreshProfile();
+		prof.addButton((b) => b.setButtonText("Edit…").onClick(() => this.plugin.editProfile(false)));
+	}
+}
+
+/** A section heading that lines up with the setting rows. */
+function heading(containerEl: HTMLElement, text: string, desc?: string) {
+	const h = new Setting(containerEl).setName(text).setHeading();
+	if (desc) h.setDesc(desc);
+}
+
+function note(containerEl: HTMLElement, text: string) {
+	containerEl.createDiv({ cls: "tezca-settings-note", text });
+}
+
+function hostLabel(host: string): string {
+	try {
+		const u = new URL(host);
+		return u.host;
+	} catch {
+		return host;
+	}
+}
+
+function statusLabel(p: TezcaPlugin): [string, "ok" | "busy" | "off" | "err"] {
+	const s = p.engine?.currentStatus();
+	if (!s) return ["Stopped", "off"];
+	if (s.conn === "online") return s.ready && !s.busy ? ["Synced", "ok"] : ["Syncing…", "busy"];
+	if (s.conn === "connecting") return ["Connecting…", "busy"];
+	if (s.conn === "unauthorized") return ["Access denied", "err"];
+	if (s.conn === "update-required") return ["Update required", "err"];
+	return ["Offline", "off"];
 }

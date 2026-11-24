@@ -70,7 +70,7 @@ describe("edge cases", function () {
 		// Choose a profile picture in the phone's settings (the file chooser gets a generated PNG).
 		const pngB64 = png(40, 30, [20, 160, 90]).toString("base64");
 		await phone.openSettings();
-		await phone.clickButton("Edit…", await phone.settingRow("Profile"));
+		await phone.clickButton("Edit profile");
 		const profile = await phone.modal("Your profile"); // selects its window
 		await phone.browser.execute((b64: string) => {
 			const proto = HTMLInputElement.prototype as HTMLInputElement & { __click?: () => void };
@@ -88,7 +88,7 @@ describe("edge cases", function () {
 		await phone.find(".tezca-profile-preview .tezca-avatar img");
 		await phone.clickButton("Save", profile);
 		await phone.noModal("Your profile");
-		await phone.find(".tezca-avatar-large img"); // the settings row shows it too
+		await phone.find(".tezca-avatar-hero img"); // the settings card shows it too
 		await phone.closeSettings();
 		const avatar = await phone.exec(({ plugins }) => plugins.tezcaSync.engine.myAvatar());
 		assert.match(avatar, /^data:image\/jpeg;base64,/);

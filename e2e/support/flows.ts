@@ -65,7 +65,7 @@ export async function openDeepLink(d: Device, link: string) {
 /** Set the name shown to others (settings → Profile → Edit…). */
 export async function setDisplayName(d: Device, name: string) {
 	await d.openSettings();
-	await d.clickButton("Edit…", await d.settingRow("Profile"));
+	await d.clickButton("Edit profile");
 	await fillProfile(d, "Your profile", name);
 	await d.closeSettings();
 }

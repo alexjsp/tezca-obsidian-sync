@@ -47,3 +47,34 @@
 .tezca-caret-name { position: absolute; left: 14px; top: -22px; padding: 1px 6px; border-radius: 9px; color: white; font: 500 11px/16px var(--font-interface); white-space: nowrap; user-select: none; pointer-events: none; z-index: 101; opacity: 0; transition: opacity 0.2s ease-in-out; }
 .tezca-caret:hover .tezca-caret-name, .tezca-caret-badge:hover + .tezca-caret-name { opacity: 1; }
 .tezca-remote-selection { border-radius: 2px; }
+
+/* ── Settings ── */
+.tezca-hero { display: flex; align-items: center; gap: 16px; padding: 18px 20px; margin: 4px 0 12px; border: 1px solid var(--background-modifier-border); border-radius: var(--radius-l); background: var(--background-secondary); }
+.tezca-hero-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.tezca-hero-title { font-size: var(--font-ui-large); font-weight: var(--font-semibold); color: var(--text-normal); }
+.tezca-hero-sub, .tezca-hero-note { color: var(--text-muted); font-size: var(--font-ui-small); line-height: 1.45; }
+.tezca-hero-note { color: var(--text-faint); }
+.tezca-hero-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.tezca-hero-chip { color: var(--text-muted); font-size: var(--font-ui-smaller); padding: 2px 8px; border-radius: 999px; background: var(--background-modifier-hover); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tezca-hero-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+.tezca-hero-setup { align-items: flex-start; }
+.tezca-hero-setup .tezca-hero-actions { margin: 6px 0 2px; }
+.tezca-hero-icon { flex: none; width: 48px; height: 48px; border-radius: 12px; display: flex; align-items: center; justify-content: center; background: var(--interactive-accent); color: var(--text-on-accent); }
+.tezca-hero-icon svg { width: 28px; height: 28px; }
+.tezca-avatar-hero { width: 52px; height: 52px; font-size: 22px; }
+.tezca-pill { display: inline-flex; align-items: center; gap: 6px; font-size: var(--font-ui-smaller); font-weight: var(--font-medium); padding: 2px 9px 2px 7px; border-radius: 999px; background: var(--background-modifier-hover); color: var(--text-normal); }
+.tezca-pill .tezca-status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); }
+.tezca-pill[data-state="ok"] .tezca-status-dot { background: var(--color-green); }
+.tezca-pill[data-state="busy"] .tezca-status-dot { background: var(--color-yellow); }
+.tezca-pill[data-state="err"] .tezca-status-dot { background: var(--color-red); }
+.tezca-settings-note { color: var(--text-muted); font-size: var(--font-ui-small); padding: 4px 0 10px; }
+.tezca-share-row .setting-item-name { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.tezca-row-icon { display: inline-flex; color: var(--text-muted); }
+.tezca-row-icon svg { width: 16px; height: 16px; }
+.tezca-role { font-size: var(--font-ui-smaller); font-weight: var(--font-medium); padding: 0 7px; border-radius: 999px; border: 1px solid var(--background-modifier-border); color: var(--text-muted); }
+.tezca-role-owner { color: var(--text-accent); border-color: color-mix(in srgb, var(--text-accent) 40%, transparent); }
+.tezca-key { font-family: var(--font-monospace); font-size: var(--font-ui-small); padding: 3px 8px; border-radius: var(--radius-s); background: var(--background-modifier-hover); white-space: nowrap; }
+@media (max-width: 560px) {
+	.tezca-hero { flex-wrap: wrap; }
+	.tezca-hero-actions { width: 100%; }
+}
