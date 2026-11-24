@@ -1,7 +1,7 @@
 # End-to-end tests in real Obsidian
 
 These drive real Obsidian windows with the plugin installed, syncing through a real Tezca server.
-They are slow-ish (a couple of minutes for everything) and open windows on your screen, so they
+Agents: ask the user before running these (see `AGENTS.md`). They are slow-ish (a couple of minutes for everything) and open windows on your screen, so they
 aren't part of `just test`. Run them when a change needs deeper testing:
 
 ```sh
