@@ -58,7 +58,7 @@ describe("guests and cross-host shares", function () {
 		assert.equal(alice.exists("Carol's diary.md"), false, "a guest's own notes stay on their device");
 		assert.equal(carol.exists("Alice only.md"), false);
 		await carol.openSettings();
-		await carol.find(".setting-item-description", { text: /You're using Tezca as a guest/ });
+		await carol.find(".tezca-settings-note", { text: /You're using Tezca as a guest/ });
 		await carol.closeSettings();
 	});
 
