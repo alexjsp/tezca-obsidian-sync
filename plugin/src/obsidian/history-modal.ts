@@ -14,6 +14,7 @@ import {
 } from "../core/history";
 import { contentModel, type DiskMirror } from "../core/mirror";
 import { log } from "../core/util";
+import { copyText } from "./modals";
 
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|bmp|avif)$/i;
 
@@ -106,8 +107,7 @@ export class HistoryModal extends Modal {
 				.setName(when(v.createdAt))
 				.setDesc(old === current ? "Same as the current text." : "Restoring removes the red text and brings back the green text.")
 				.addButton((b) => b.setButtonText("Copy text").onClick(async () => {
-					await navigator.clipboard.writeText(old);
-					new Notice("Copied");
+					new Notice((await copyText(old, this.contentEl)) ? "Copied" : "Couldn't copy");
 				}))
 				.addButton((b) =>
 					b

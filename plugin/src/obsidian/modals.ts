@@ -1,5 +1,39 @@
-import { App, Modal, Notice, Setting } from "obsidian";
+import { App, Modal, Notice, Setting, setIcon } from "obsidian";
 import qrcode from "qrcode-generator";
+
+/**
+ * Copy text to the clipboard from a UI element. Writes through Electron's clipboard on desktop
+ * (navigator.clipboard refuses when the document isn't focused, e.g. a dialog in the Settings
+ * window copying via the main window), else the element's own window, else select-and-copy.
+ */
+export async function copyText(text: string, from: HTMLElement): Promise<boolean> {
+	try {
+		const electron = (window as unknown as { require?: (m: string) => { clipboard?: { writeText(t: string): void } } }).require?.("electron");
+		if (electron?.clipboard) {
+			electron.clipboard.writeText(text);
+			return true;
+		}
+	} catch {
+		/* not desktop */
+	}
+	const win = (from as HTMLElement & { win?: Window }).win ?? window;
+	try {
+		await win.navigator.clipboard.writeText(text);
+		return true;
+	} catch {
+		/* fall through */
+	}
+	const doc = from.ownerDocument;
+	const ta = doc.createElement("textarea");
+	ta.value = text;
+	ta.style.position = "fixed";
+	ta.style.opacity = "0";
+	doc.body.appendChild(ta);
+	ta.select();
+	const ok = doc.execCommand("copy");
+	ta.remove();
+	return ok;
+}
 
 export function qrSvg(text: string, cell = 4): string {
 	const qr = qrcode(0, "M");
@@ -35,8 +69,7 @@ export class LinkModal extends Modal {
 				.setButtonText("Copy link")
 				.setCta()
 				.onClick(async () => {
-					await navigator.clipboard.writeText(this.link);
-					new Notice("Link copied");
+					new Notice((await copyText(this.link, this.contentEl)) ? "Link copied" : "Couldn't copy: select the link and copy it");
 				}),
 		);
 	}
@@ -62,29 +95,33 @@ export class RecoveryPhraseModal extends Modal {
 		});
 		const grid = contentEl.createDiv({ cls: "tezca-phrase" });
 		this.phrase.split(" ").forEach((w, i) => grid.createDiv({ text: `${i + 1}. ${w}` }));
+		const copy = contentEl.createEl("button", { cls: "tezca-copy-phrase" });
+		const icon = copy.createSpan({ cls: "tezca-copy-icon" });
+		setIcon(icon, "copy");
+		const label = copy.createSpan({ text: "Copy recovery phrase" });
+		copy.onclick = async () => {
+			if (await copyText(this.phrase, contentEl)) {
+				setIcon(icon, "check");
+				label.setText("Copied. Paste it somewhere safe, then clear your clipboard.");
+				copy.addClass("is-copied");
+			} else new Notice("Couldn't copy. Select the words and copy them instead.");
+		};
 		let ack = false;
 		new Setting(contentEl)
 			.setName("I have saved my recovery phrase")
 			.addToggle((t) => t.onChange((v) => (ack = v)));
-		new Setting(contentEl)
-			.addButton((b) =>
-				b.setButtonText("Copy").onClick(async () => {
-					await navigator.clipboard.writeText(this.phrase);
-					new Notice("Recovery phrase copied. Don't leave it in your clipboard.");
+		new Setting(contentEl).addButton((b) =>
+			b
+				.setButtonText("Done")
+				.setCta()
+				.onClick(() => {
+					if (!ack) {
+						new Notice("Please confirm you've saved the phrase first.");
+						return;
+					}
+					this.close();
 				}),
-			)
-			.addButton((b) =>
-				b
-					.setButtonText("Done")
-					.setCta()
-					.onClick(() => {
-						if (!ack) {
-							new Notice("Please confirm you've saved the phrase first.");
-							return;
-						}
-						this.close();
-					}),
-			);
+		);
 	}
 	onClose() {
 		this.contentEl.empty();

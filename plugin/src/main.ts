@@ -380,7 +380,10 @@ export default class TezcaPlugin extends Plugin {
 			else if (s.conn === "update-required") [text, cls] = ["Tezca: update required", "err"];
 			else [text, cls] = ["Tezca: offline", "off"];
 		}
-		el.setText(text);
+		// All's well: just the dot (hover for the text). Anything else says what's going on.
+		el.empty();
+		el.createSpan({ cls: "tezca-status-dot" });
+		if (cls !== "ok") el.createSpan({ cls: "tezca-status-text", text });
 		el.dataset.state = cls;
 		el.setAttr("aria-label", text);
 	}
