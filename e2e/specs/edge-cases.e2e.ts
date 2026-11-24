@@ -67,7 +67,7 @@ describe("edge cases", function () {
 			{ what: "the phone's named cursor on the mac", timeout: 5_000 },
 		);
 		// No picture yet: the cursor shows the initial.
-		assert.equal(await mac.exec(() => document.querySelector(".workspace-leaf.mod-active .tezca-caret-badge")?.textContent), "P");
+		assert.equal(await mac.exec(() => (document.querySelector(".workspace-leaf.mod-active .tezca-caret-badge") as HTMLElement | null)?.dataset.initial), "P");
 
 		// Choose a profile picture in the phone's settings (the file chooser gets a generated PNG).
 		const pngB64 = png(40, 30, [20, 160, 90]).toString("base64");

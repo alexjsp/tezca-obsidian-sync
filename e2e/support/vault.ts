@@ -10,7 +10,7 @@ export function listFiles(root: string, dir = "", config = false): string[] {
 	const out: string[] = [];
 	for (const name of readdirSync(join(root, dir))) {
 		const rel = dir ? `${dir}/${name}` : name;
-		if (!dir && ((name === ".obsidian" && !config) || name === ".trash" || name === ".gitkeep")) continue;
+		if (!dir && ((name === ".obsidian" && !config) || name === ".trash" || name === ".gitkeep" || name === ".tezca-backup")) continue;
 		if (name === ".DS_Store") continue;
 		if (statSync(join(root, rel)).isDirectory()) out.push(...listFiles(root, rel, config));
 		else out.push(rel);

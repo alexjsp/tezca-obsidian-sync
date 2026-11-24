@@ -42,7 +42,7 @@ class CaretWidget extends WidgetType {
 			img.src = this.avatar;
 			img.alt = "";
 			badge.append(img);
-		} else badge.textContent = (this.name.trim()[0] ?? "?").toUpperCase();
+		} else badge.dataset.initial = (this.name.trim()[0] ?? "?").toUpperCase();
 		const label = document.createElement("span");
 		label.className = "tezca-caret-name";
 		label.style.backgroundColor = this.color;

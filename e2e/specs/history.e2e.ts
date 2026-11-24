@@ -51,9 +51,8 @@ describe("history: versions and recently deleted", function () {
 
 		await mac.contextMenu("Diary.md", "Version history");
 		const m = await mac.modal("History: Diary.md");
-		const item = await m.$(".tezca-history-item");
-		await item.waitForExist({ timeout: 15_000 });
-		await mac.click(item as unknown as WebdriverIO.Element);
+		const item = await mac.find(".tezca-history-item", { within: ".modal", text: /Saved version/ });
+		await mac.click(item);
 		// The diff shows what restoring removes (red) and brings back (green).
 		const diffAs = (skip: string) =>
 			mac.exec((_, skip) => {
@@ -66,6 +65,24 @@ describe("history: versions and recently deleted", function () {
 		await mac.noModal("History: Diary.md");
 		await mac.waitForFile("Diary.md", "Monday: sunny.\n");
 		await phone.waitForFile("Diary.md", "Monday: sunny.\n");
+	});
+
+	it("offers the moment before a large deletion (from the host's edit log) and restores it", async function () {
+		const full = "# Reading list\n\n" + Array.from({ length: 25 }, (_, i) => `- Book ${i + 1}: worth reading`).join("\n") + "\n";
+		await mac.write("Reading.md", full);
+		await phone.waitForFile("Reading.md", full);
+		await phone.write("Reading.md", "# Reading list\n"); // most of it gone
+		await mac.waitForFile("Reading.md", "# Reading list\n");
+		await mac.contextMenu("Reading.md", "Version history");
+		await mac.modal("History: Reading.md");
+		const item = await mac.find(".tezca-history-item.tezca-history-warn", { within: ".modal" });
+		assert.match(await item.getText(), /Before a large deletion/);
+		await mac.click(item);
+		const m = await mac.modal("History: Reading.md");
+		await mac.clickButton("Restore this version", m);
+		await mac.noModal("History: Reading.md");
+		await mac.waitForFile("Reading.md", full);
+		await phone.waitForFile("Reading.md", full);
 	});
 
 	it("restores an earlier version of an attachment, with a preview", async function () {

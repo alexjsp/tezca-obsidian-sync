@@ -28,6 +28,7 @@
 @media (max-width: 600px) { .tezca-history { flex-direction: column; } .tezca-history-list { flex-basis: auto; max-height: 30vh; border-right: none; } }
 .tezca-presence { display: flex; gap: 2px; align-items: center; }
 .tezca-avatar { display: inline-flex; flex: none; width: 16px; height: 16px; border-radius: 50%; align-items: center; justify-content: center; font-size: 10px; font-weight: 600; color: white; overflow: hidden; vertical-align: middle; }
+.tezca-avatar[data-initial]::before, .tezca-caret-badge[data-initial]::before { content: attr(data-initial); }
 .tezca-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .tezca-avatar-large { width: 32px; height: 32px; font-size: 15px; margin-right: 4px; }
 .modal .setting-item-name .tezca-avatar { width: 20px; height: 20px; font-size: 11px; margin-right: 8px; }

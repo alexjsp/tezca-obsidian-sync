@@ -53,9 +53,12 @@ export async function toAvatar(file: Blob, doc: Document = document): Promise<st
 /** A round avatar: the picture, or the name's initial on the colour. */
 export function renderAvatar(el: HTMLElement, p: { name: string; color: string; avatar?: string | null }) {
 	el.empty();
+	delete el.dataset.initial;
 	el.addClass("tezca-avatar");
 	el.style.backgroundColor = p.color;
+	// The initial is drawn by CSS (data-initial), so it isn't part of the surrounding text.
 	if (p.avatar) el.createEl("img", { attr: { src: p.avatar, alt: "" } });
-	else el.setText((p.name.trim()[0] ?? "?").toUpperCase());
+	else el.dataset.initial = (p.name.trim()[0] ?? "?").toUpperCase();
 	el.setAttr("title", p.name);
+	el.setAttr("aria-hidden", "true");
 }
