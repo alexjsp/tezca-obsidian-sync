@@ -190,4 +190,25 @@ describe("edge cases", function () {
 		await waitFor(() => bulk(mac) === 2, { what: "the deletes to reach the mac", detail: () => bulk(mac) });
 		await waitConverged([mac, phone]);
 	});
+
+	it("survives flipping all the settings-sync switches quickly", async function () {
+		const names = ["Core settings", "Appearance", "Hotkeys", "Community plugin list and settings", "Community plugin code"];
+		for (const on of [true, false]) {
+			await mac.openSettings();
+			await mac.settingRow(names[0]); // selects the Settings window
+			// All five at once (WebDriver clicks are slower than a person flicking switches).
+			await mac.browser.execute((names: string[]) => {
+				for (const row of document.querySelectorAll(".setting-item"))
+					if (names.includes(row.querySelector(".setting-item-name")?.textContent ?? "")) (row.querySelector(".checkbox-container") as HTMLElement).click();
+			}, names);
+			await mac.closeSettings();
+			await mac.waitSynced(60_000);
+			const errors = (await mac.noticesSeen()).filter((n) => /IDBDatabase|could not start|InvalidStateError/.test(n));
+			assert.deepEqual(errors, []);
+			const cfg = await mac.exec(({ plugins }) => plugins.tezcaSync.settings.configSync);
+			assert.ok(Object.values(cfg).every((v) => v === on), JSON.stringify(cfg));
+		}
+		await mac.write("After toggling.md", "Still syncing.\n");
+		await phone.waitForFile("After toggling.md", "Still syncing.\n");
+	});
 });
