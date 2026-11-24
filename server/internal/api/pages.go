@@ -109,6 +109,7 @@ ol.steps .d{color:var(--muted);font-size:.95rem}
 .note{background:var(--accent-soft);border-radius:10px;padding:12px 14px;font-size:.92rem;margin:16px 0 0}
 .grid{display:grid;gap:20px;margin-top:8px}
 .grid>div{border-top:1px solid var(--border);padding-top:18px}
+.grid>div:first-child{border-top:0;padding-top:4px}
 .grid p{margin:0}
 footer{color:var(--muted);font-size:.85rem;margin-top:24px;text-align:center;line-height:1.8}
 footer a{color:inherit}
