@@ -5,7 +5,7 @@ import { randomBytes } from "node:crypto";
 import { Device } from "../support/device";
 import { claimHost, pairDevice } from "../support/flows";
 import { TezcaServer } from "../support/server";
-import { conflictFiles, listFiles, waitConverged } from "../support/vault";
+import { conflictFiles, listFiles, png, waitConverged } from "../support/vault";
 import { sleep, waitFor } from "../support/wait";
 
 describe("edge cases", function () {
@@ -63,8 +63,39 @@ describe("edge cases", function () {
 		await phone.cursor({ line: 1, ch: 4 });
 		await mac.open("Cursors.md");
 		await waitFor(
-			() => mac.exec(() => [...document.querySelectorAll(".workspace-leaf.mod-active .cm-ySelectionInfo")].map((e) => e.textContent)).then((n) => n.includes("Phone person")),
-			{ what: "the phone's named cursor on the mac", timeout: 15_000 },
+			() => mac.exec(() => [...document.querySelectorAll(".workspace-leaf.mod-active .tezca-caret-name")].map((e) => e.textContent)).then((n) => n.includes("Phone person")),
+			{ what: "the phone's named cursor on the mac", timeout: 5_000 },
+		);
+		// No picture yet: the cursor shows the initial.
+		assert.equal(await mac.exec(() => document.querySelector(".workspace-leaf.mod-active .tezca-caret-badge")?.textContent), "P");
+
+		// Choose a profile picture in the phone's settings (the file chooser gets a generated PNG).
+		const pngB64 = png(40, 30, [20, 160, 90]).toString("base64");
+		await phone.openSettings();
+		await phone.settingRow("Profile picture"); // selects the settings' window
+		await phone.browser.execute((b64: string) => {
+			const proto = HTMLInputElement.prototype as HTMLInputElement & { __click?: () => void };
+			proto.__click ??= proto.click;
+			proto.click = function (this: HTMLInputElement) {
+				if (this.type !== "file") return proto.__click!.call(this);
+				const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+				const dt = new DataTransfer();
+				dt.items.add(new File([bytes], "me.png", { type: "image/png" }));
+				this.files = dt.files;
+				this.dispatchEvent(new Event("change"));
+			};
+		}, pngB64);
+		await phone.clickButton("Choose…", await phone.settingRow("Profile picture"));
+		await phone.find(".tezca-avatar-large img");
+		await phone.closeSettings();
+		const avatar = await phone.exec(({ plugins }) => plugins.tezcaSync.engine.myAvatar());
+		assert.match(avatar, /^data:image\/jpeg;base64,/);
+		// It reaches the mac (same person, so it's the mac's picture too) and shows on the phone's cursor there.
+		await waitFor(() => mac.exec(({ plugins }) => plugins.tezcaSync.engine.myAvatar()).then((a) => a === avatar), { what: "the picture on the mac" });
+		await phone.cursor({ line: 0, ch: 2 });
+		await waitFor(
+			() => mac.exec(() => (document.querySelector(".workspace-leaf.mod-active .tezca-caret-badge img") as HTMLImageElement | null)?.src ?? null).then((src) => src === avatar),
+			{ what: "the picture on the phone's cursor on the mac" },
 		);
 
 		// The same note in two panes on the mac: remote and local edits show in both, once.
