@@ -244,7 +244,11 @@ export class DocSync {
 		if (!this.awareness) return;
 		try {
 			const plain = open(this.ctx.keyFor(a.epoch), a.payload, ad.awareness(a.spaceId, a.docId, a.epoch));
+			const known = new Set(this.awareness.getStates().keys());
 			applyAwarenessUpdate(this.awareness, plain, AWARENESS_REMOTE);
+			// Someone just opened this note: tell them where we are now, rather than leaving them
+			// without our cursor until our next periodic renewal (~15s).
+			if ([...this.awareness.getStates().keys()].some((c) => !known.has(c))) this.broadcastLocalAwareness();
 		} catch (e) {
 			log.debug("awareness decrypt failed", e);
 		}
