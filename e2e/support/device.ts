@@ -103,7 +103,7 @@ export class Device {
 	// ───────── running code inside Obsidian ─────────
 
 	/** `browser.executeObsidian`: `plugins.tezcaSync` is the Tezca plugin instance. */
-	async exec<R, P extends unknown[]>(fn: (o: { app: any; obsidian: any; plugins: any }, ...p: P) => R, ...params: P): Promise<R> {
+	async exec<R, P extends unknown[]>(fn: (o: { app: any; obsidian: any; plugins: any }, ...p: P) => R | Promise<R>, ...params: P): Promise<R> {
 		await this.toMain();
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		return this.browser.executeObsidian(fn as any, ...params) as Promise<R>;
