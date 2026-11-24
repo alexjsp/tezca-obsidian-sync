@@ -386,7 +386,7 @@ export default class TezcaPlugin extends Plugin {
 				// One reminder per burst of settings changes.
 				if (Date.now() - lastConfigNotice < 60_000) return;
 				lastConfigNotice = Date.now();
-				new Notice("Tezca: settings changed on another device. Reload Obsidian to apply them.", 10000);
+				this.reloadNotice();
 				return;
 			}
 			new Notice(`Tezca: ${n.message}`, n.kind === "brake" ? 0 : 8000);
@@ -424,6 +424,17 @@ export default class TezcaPlugin extends Plugin {
 			}
 		});
 		this.editors.rebindViews(views);
+	}
+
+	/** "Settings changed elsewhere" notice; tapping it saves sync state and reloads Obsidian. */
+	private reloadNotice() {
+		const notice = new Notice("Tezca: settings changed on another device. Tap here to reload Obsidian and apply them.", 15000);
+		notice.noticeEl.addEventListener("click", () => {
+			void (async () => {
+				await this.stopEngine();
+				(this.app as unknown as { commands: { executeCommandById(id: string): boolean } }).commands.executeCommandById("app:reload");
+			})();
+		});
 	}
 
 	private async stopEngineNow() {
