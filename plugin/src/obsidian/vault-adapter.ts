@@ -185,22 +185,54 @@ export class ObsidianVault implements VaultAdapter {
 	}
 
 	/** Compare config files against what we've seen; emit create/modify/delete for the differences. */
-	private async scanConfig(cb: (e: VaultEvent) => void, quiet = false) {
+	private async scanConfig(quiet = false) {
 		const now = new Map<string, number>();
 		for (const item of await this.listConfig()) {
 			if (item.kind !== "file") continue;
 			const st = await this.adapter.stat(item.path).catch(() => null);
 			if (st?.type === "file") now.set(item.path, st.mtime);
 		}
+		const events: VaultEvent[] = [];
 		if (!quiet) {
 			for (const [p, m] of now) {
 				const seen = this.configSeen.get(p);
-				if (seen === undefined) cb({ type: "create", path: p, kind: "file" });
-				else if (seen !== m) cb({ type: "modify", path: p, kind: "file" });
+				if (seen === undefined) events.push({ type: "create", path: p, kind: "file" });
+				else if (seen !== m) events.push({ type: "modify", path: p, kind: "file" });
 			}
-			for (const p of this.configSeen.keys()) if (!now.has(p)) cb({ type: "delete", path: p, kind: "file" });
+			for (const p of this.configSeen.keys()) if (!now.has(p)) events.push({ type: "delete", path: p, kind: "file" });
 		}
 		this.configSeen = now;
+		// One scan for all subscribers (the engine and every mirror): `configSeen` is shared, so
+		// separate scans would each see only the changes the others hadn't consumed yet.
+		for (const e of events) for (const cb of this.configListeners) cb(e);
+	}
+
+	private configListeners = new Set<(e: VaultEvent) => void>();
+	private stopConfigWatch: (() => void) | null = null;
+	private scanning: Promise<void> | null = null;
+
+	private scan(quiet = false) {
+		if (!this.scanning) this.scanning = this.scanConfig(quiet).finally(() => (this.scanning = null));
+		return this.scanning;
+	}
+
+	/** Watch the config folder (not in Obsidian's file index) while anyone is subscribed. */
+	private watchConfig(): () => void {
+		void this.scan(true);
+		let rawTimer: number | null = null;
+		// "raw" fires for every filesystem change, including the config folder (not in the public typings).
+		const raw = (this.vault as unknown as { on(name: "raw", cb: (path: string) => void): EventRef }).on("raw", (path: string) => {
+			if (!this.isConfig(path)) return;
+			if (rawTimer !== null) window.clearTimeout(rawTimer);
+			rawTimer = window.setTimeout(() => void this.scan(), 500);
+		});
+		// Plus a periodic scan (mobile has no watcher, and anything the watcher missed).
+		const interval = window.setInterval(() => void this.scan(), 30_000);
+		return () => {
+			this.vault.offref(raw);
+			window.clearInterval(interval);
+			if (rawTimer !== null) window.clearTimeout(rawTimer);
+		};
 	}
 
 	onEvent(cb: (e: VaultEvent) => void): () => void {
@@ -212,27 +244,15 @@ export class ObsidianVault implements VaultAdapter {
 			this.vault.on("rename", (f, oldPath) => cb({ type: "rename", path: f.path, oldPath, kind: kind(f) })),
 		];
 		if (!this.syncConfig) return () => refs.forEach((r) => this.vault.offref(r));
-		// The config folder isn't in Obsidian's file index: watch it via raw events (desktop) plus a
-		// periodic scan (mobile, and anything the watcher missed).
-		let scanning: Promise<void> | null = null;
-		const scan = (quiet = false) => {
-			if (!scanning) scanning = this.scanConfig(cb, quiet).finally(() => (scanning = null));
-			return scanning;
-		};
-		void scan(true);
-		let rawTimer: number | null = null;
-		// "raw" fires for every filesystem change, including the config folder (not in the public typings).
-		const raw = (this.vault as unknown as { on(name: "raw", cb: (path: string) => void): EventRef }).on("raw", (path: string) => {
-			if (!this.isConfig(path)) return;
-			if (rawTimer !== null) window.clearTimeout(rawTimer);
-			rawTimer = window.setTimeout(() => void scan(), 500);
-		});
-		const interval = window.setInterval(() => void scan(), 30_000);
+		this.configListeners.add(cb);
+		if (!this.stopConfigWatch) this.stopConfigWatch = this.watchConfig();
 		return () => {
 			refs.forEach((r) => this.vault.offref(r));
-			this.vault.offref(raw);
-			window.clearInterval(interval);
-			if (rawTimer !== null) window.clearTimeout(rawTimer);
+			this.configListeners.delete(cb);
+			if (!this.configListeners.size && this.stopConfigWatch) {
+				this.stopConfigWatch();
+				this.stopConfigWatch = null;
+			}
 		};
 	}
 
