@@ -39,11 +39,12 @@ For Docker, see [`deploy/README.md`](../deploy/README.md).
 | `TEZCA_SERVER_NAME` | `Tezca` | Display name on the setup pages and in `/api/info`. |
 | `TEZCA_PLUGIN_REPO` | `alexjsp/tezca-obsidian-sync` | GitHub `owner/repo` of the Obsidian plugin. The home and invite pages tell people to add it in BRAT, and link to it. |
 | `TEZCA_CLAIM_CODE` | (random) | Presets the claim code while the server is unclaimed. |
+| `PUID` / `PGID` | (unset) | When the container is started as root (`--user 0:0`, as the Unraid template does), the server gives the data directory to this user and group and then runs as them. Unraid uses `99` / `100`. |
 | `TEZCA_DEBUG` | (unset) | Any value enables debug logging. |
 | `TEZCA_MAX_BLOB_MB` | `100` | Largest attachment (plaintext MiB). Uploads over this + 40 bytes of encryption overhead get 413. Shown to clients as `max_blob_bytes` in `/api/info`. |
 | `TEZCA_GUEST_QUOTA_MB` | `1024` | Storage cap per guest (a user who joined through a share invite and has no host account): the total size of attachments they upload to this server, in MiB. Uploads over it get 507. `0` = unlimited. |
 | `TEZCA_HISTORY_HOURS` | `24` | Version history: keep the newest snapshot per clock hour for this many hours. |
-| `TEZCA_HISTORY_DAYS` | `30` | Version history: keep the newest snapshot per UTC day for this many days. The latest snapshot is always kept. |
+| `TEZCA_HISTORY_DAYS` | `30` | Version history: keep the newest snapshot per UTC day for this many days, and the edit log for this long (point-in-time restore). The latest snapshot is always kept. |
 
 Attachments (blobs) are stored on the filesystem under `$TEZCA_DATA_DIR/blobs/` unless
 `TEZCA_S3_BUCKET` is set, in which case they go to an S3-compatible bucket (AWS S3, MinIO, R2, B2, …).
