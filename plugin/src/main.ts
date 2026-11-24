@@ -288,6 +288,39 @@ export default class TezcaPlugin extends Plugin {
 		return this.engine?.myAvatar() ?? (this.settings.pendingAvatar || null);
 	}
 
+	/**
+	 * Fill in the synced profile from this device: a picture chosen on the welcome screen before sync
+	 * was set up, and the name and colour (kept per device before they synced). Only once the synced
+	 * profile has arrived, or this device's would replace it.
+	 */
+	private async seedProfile(engine: SyncEngine) {
+		const root = engine.root;
+		if (!root) return;
+		await root.space.index.whenSynced();
+		if (this.engine !== engine) return;
+		const mine = engine.myProfile();
+		const fill: { name?: string; color?: string; avatar?: string } = {};
+		if (!mine.name && this.settings.displayName) fill.name = this.settings.displayName;
+		if (!mine.color && this.settings.color) fill.color = this.settings.color;
+		if (!mine.avatar && this.settings.pendingAvatar) fill.avatar = this.settings.pendingAvatar;
+		if (Object.keys(fill).length) engine.setProfile(fill);
+		if (this.settings.pendingAvatar && engine.myAvatar()) this.settings.pendingAvatar = "";
+		this.adoptProfile();
+		await this.saveSettings();
+	}
+
+	/** Take the synced name and colour (changed here or on another device) into this device's settings. */
+	private adoptProfile() {
+		const p = this.engine?.myProfile();
+		if (p && ((p.name && p.name !== this.settings.displayName) || (p.color && p.color !== this.settings.color))) {
+			if (p.name) this.settings.displayName = p.name;
+			if (p.color) this.settings.color = p.color;
+			void this.saveSettings();
+			this.editors.updateUser();
+		}
+		this.settingTab.refreshProfile();
+	}
+
 	/** The profile screen: on first run (welcome) and from settings. */
 	editProfile(welcome: boolean) {
 		new ProfileModal(
@@ -298,12 +331,11 @@ export default class TezcaPlugin extends Plugin {
 				save: async (p) => {
 					this.settings.displayName = p.name;
 					this.settings.color = p.color;
-					if (p.avatar !== undefined) {
-						if (this.engine?.root) {
-							this.engine.setAvatar(p.avatar);
-							this.settings.pendingAvatar = "";
-						} else this.settings.pendingAvatar = p.avatar ?? "";
-					}
+					if (this.engine?.root) {
+						// Synced to all this user's devices (and their shared folders).
+						this.engine.setProfile({ name: p.name, color: p.color, ...(p.avatar !== undefined ? { avatar: p.avatar } : {}) });
+						if (p.avatar !== undefined) this.settings.pendingAvatar = "";
+					} else if (p.avatar !== undefined) this.settings.pendingAvatar = p.avatar ?? "";
 					await this.saveSettings();
 					this.editors.updateUser();
 					this.engine?.updateProfile();
@@ -370,7 +402,7 @@ export default class TezcaPlugin extends Plugin {
 		});
 		let lastConfigNotice = 0;
 		engine.sharesChanged.on(() => this.editors.refreshAccess());
-		engine.profileChanged.on(() => this.settingTab.refreshProfile());
+		engine.profileChanged.on(() => this.adoptProfile());
 		// An admin can change this account's role; the host then reconnects us with the new one.
 		const syncRole = (ok: AuthOk) => {
 			const role = { [HostRole.ADMIN]: "admin", [HostRole.MEMBER]: "member", [HostRole.GUEST]: "guest" }[ok.role as number];
@@ -404,12 +436,7 @@ export default class TezcaPlugin extends Plugin {
 			return;
 		}
 		if (this.engine !== engine) return;
-		// A picture chosen on the welcome screen before sync was set up.
-		if (this.settings.pendingAvatar && engine.root && !engine.myAvatar()) {
-			engine.setAvatar(this.settings.pendingAvatar);
-			this.settings.pendingAvatar = "";
-			await this.saveSettings();
-		}
+		void this.seedProfile(engine);
 		this.rebindOpenEditors();
 	}
 

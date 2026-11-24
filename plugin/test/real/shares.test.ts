@@ -142,6 +142,26 @@ describe("shared folders (real server)", () => {
 		expect(() => v.engine.setRecommendedPlugins(spaceId, [])).toThrow(/can edit/);
 	});
 
+	it("a profile change on one device reaches the user's other devices and their shared folders", async () => {
+		const alex = await claimAdmin(server, "Alex");
+		const sam = await inviteMember(server, alex, "Sam");
+		const a1 = await device(alex, "a-mac", { "Docs/x.md": "x" });
+		const a2 = await device(alex, "a-phone");
+		const spaceId = await a1.engine.shareFolder("Docs", "Docs");
+		const s = await device(sam, "s");
+		await join(a1, s, spaceId, "editor", "Docs");
+		await eventually(() => a2.engine.shares.has(spaceId), 10_000, "Alex's phone mounts the share");
+
+		a2.engine.setProfile({ name: "Alex S-P", color: "#123456" });
+		await eventually(() => a1.engine.myProfile().name === "Alex S-P" && a1.engine.myProfile().color === "#123456", 10_000, "the Mac gets the new profile");
+		const seen = () => s.engine.members(spaceId).find((m) => !m.isMe && m.signPk && m.name === "Alex S-P");
+		await eventually(() => seen()?.color === "#123456", 10_000, "Sam sees the new name and colour");
+		// Changing one field keeps the others.
+		a1.engine.setProfile({ color: "#654321" });
+		await eventually(() => a2.engine.myProfile().color === "#654321", 10_000, "colour change syncs");
+		expect(a2.engine.myProfile().name).toBe("Alex S-P");
+	});
+
 	it("a viewer made an editor publishes their name to the member list", async () => {
 		const alex = await claimAdmin(server, "Alex");
 		const vic = await inviteMember(server, alex, "Vic");

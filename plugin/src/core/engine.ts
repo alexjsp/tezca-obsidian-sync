@@ -76,6 +76,13 @@ export interface ShareMember {
 const ROLE_NAMES: Record<number, ShareRole> = { [SpaceRole.OWNER]: "owner", [SpaceRole.EDITOR]: "editor", [SpaceRole.VIEWER]: "viewer" };
 
 /** Everything this device holds for one host. */
+/** The user's own profile, shared by all their devices. */
+export interface MyProfile {
+	name?: string;
+	color?: string;
+	avatar?: string;
+}
+
 export class HostLink {
 	readonly conn: HostConnection;
 	readonly api: HostApi;
@@ -507,35 +514,54 @@ export class SyncEngine {
 	}
 
 	/**
-	 * Our profile picture (a small data URL), or undefined. It's kept in our own space's member
-	 * profiles (so every device of ours has it) and copied into each shared folder's.
+	 * Our profile (display name, colour, picture), as kept in our own space's member profiles, so
+	 * every device of ours shares it. It's copied into each shared folder's member profiles.
 	 */
-	myAvatar(): string | undefined {
+	myProfile(): MyProfile {
 		try {
-			const p = JSON.parse(this.root?.space.index.ydoc.getMap<string>("members").get(this.myKey) ?? "{}") as { avatar?: string };
-			return safeAvatar(p.avatar) ?? undefined;
+			const p = JSON.parse(this.root?.space.index.ydoc.getMap<string>("members").get(this.myKey) ?? "{}") as Record<string, unknown>;
+			const color = safeColor(p.color, "");
+			return { name: safeName(p.name), color: color || undefined, avatar: safeAvatar(p.avatar) ?? undefined };
 		} catch {
-			return undefined;
+			return {};
 		}
 	}
 
-	/** Set (or with null, remove) our profile picture on all our devices and shared folders. */
-	setAvatar(dataUrl: string | null): void {
+	/** Our profile picture (a small data URL), or undefined. */
+	myAvatar(): string | undefined {
+		return this.myProfile().avatar;
+	}
+
+	/**
+	 * Change our profile on all our devices and shared folders. Fields left out are kept; an
+	 * avatar of null removes the picture.
+	 */
+	setProfile(change: { name?: string; color?: string; avatar?: string | null }): void {
 		const space = this.root?.space;
 		if (!space) throw new Error("Sync isn't running");
+		const p = this.myProfile();
+		if (change.name !== undefined) p.name = safeName(change.name);
+		if (change.color !== undefined) p.color = safeColor(change.color, "") || undefined;
+		if (change.avatar !== undefined) p.avatar = safeAvatar(change.avatar) ?? undefined;
 		const members = space.index.ydoc.getMap<string>("members");
-		const v = JSON.stringify(dataUrl ? { avatar: dataUrl } : {});
+		const v = JSON.stringify(p); // (undefined fields drop out)
 		if (members.get(this.myKey) !== v) space.index.ydoc.transact(() => members.set(this.myKey, v), LOCAL_ORIGIN);
 		// (The members observer republishes to shares.)
 	}
 
+	/** Set (or with null, remove) our profile picture on all our devices and shared folders. */
+	setAvatar(dataUrl: string | null): void {
+		this.setProfile({ avatar: dataUrl });
+	}
+
 	/** Write this user's display name, colour and picture into a share's member profiles. */
 	private writeProfile(space: SpaceSync) {
-		const p = this.opts.profile?.();
-		if (!p || !space.canWrite()) return;
+		const local = this.opts.profile?.();
+		if (!local || !space.canWrite()) return;
+		const mine = this.myProfile();
+		const p = { name: mine.name ?? local.name, color: mine.color ?? local.color, ...(mine.avatar ? { avatar: mine.avatar } : {}) };
 		const members = space.index.ydoc.getMap<string>("members");
-		const avatar = this.myAvatar();
-		const v = JSON.stringify(avatar ? { ...p, avatar } : p);
+		const v = JSON.stringify(p);
 		if (members.get(this.myKey) !== v) space.index.ydoc.transact(() => members.set(this.myKey, v), LOCAL_ORIGIN);
 	}
 
