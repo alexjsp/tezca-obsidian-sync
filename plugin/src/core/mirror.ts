@@ -508,7 +508,17 @@ export class DiskMirror {
 
 	// ───────────── startup reconcile ─────────────
 
-	private async reconcileAll(): Promise<void> {
+	/** Re-run the startup reconcile without the safety brake (the user confirmed what it paused). */
+	async forceReconcile(): Promise<void> {
+		await this.enqueue(() => this.reconcileAll(true));
+	}
+
+	/** Write back every synced file that's missing on disk (the other answer to the brake). */
+	restoreMissing(): void {
+		for (const e of this.index.live()) if (e.kind !== "folder") this.touch(e.id);
+	}
+
+	private async reconcileAll(force = false): Promise<void> {
 		// 1. deterministic resolution of path collisions in the index
 		const { renames } = this.index.resolvePaths();
 		for (const r of renames) this.index.setPath(r.id, r.path, LOCAL_ORIGIN);
@@ -593,10 +603,10 @@ export class DiskMirror {
 		const total = Math.max(1, [...byPath.values()].filter((e) => e.kind !== "folder").length);
 		const brake = this.opts.brake ?? { minFiles: 20, fraction: 0.25 };
 		const destructive = overwrites + deletes;
-		if (destructive > brake.minFiles && destructive / total > brake.fraction) {
+		if (!force && destructive > brake.minFiles && destructive / total > brake.fraction) {
 			this.notices.emit({
 				kind: "brake",
-				message: `Sync paused: reconciling would overwrite or delete ${destructive} of ${total} notes. Check the vault and use "Force full reconcile" if this is expected.`,
+				message: `Sync paused: ${destructive} of ${total} files changed or went missing while Tezca wasn't running, so nothing was overwritten or deleted on your other devices. If that's intended, run the command "Force full reconcile". To get the files back instead, run "Restore files missing from this device".`,
 			});
 			this.brakeEngaged = true;
 		}

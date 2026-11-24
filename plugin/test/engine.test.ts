@@ -339,3 +339,57 @@ describe("sync engine (mock host)", () => {
 		compaction.updates = 500;
 	});
 });
+
+describe("presence", () => {
+	it("someone opening a note late sees the cursors already there straight away", async () => {
+		const { a, b } = await pair({ a: { "n.md": "hello" } });
+		await converged(a, b);
+		const id = a.engine.mirror!.index.live().find((e) => e.path === "n.md")!.id;
+		const da = await a.engine.mirror!.space.acquireSynced(id);
+		da.getAwareness().setLocalStateField("user", { name: "A" });
+		await new Promise((r) => setTimeout(r, 300));
+		// B opens the note afterwards.
+		const db = await b.engine.mirror!.space.acquireSynced(id);
+		db.getAwareness().setLocalStateField("user", { name: "B" });
+		const names = (aw: ReturnType<typeof da.getAwareness>) => [...aw.getStates().values()].map((s) => (s as { user?: { name?: string } }).user?.name);
+		await eventually(() => names(db.getAwareness()).includes("A") && names(da.getAwareness()).includes("B"), 2000, "both see each other");
+		a.engine.mirror!.space.release(id);
+		b.engine.mirror!.space.release(id);
+	});
+});
+
+describe("safety brake", () => {
+	async function massDeleteWhileClosed() {
+		const files: Record<string, string> = {};
+		for (let i = 0; i < 24; i++) files[`bulk/n${i}.md`] = `note ${i}`;
+		const { host, id, spaceId, a, b } = await pair({ a: files });
+		await converged(a, b);
+		await b.engine.stop();
+		clients = clients.filter((c) => c !== b);
+		for (let i = 0; i < 22; i++) b.vault.files.delete(`bulk/n${i}.md`);
+		const b2 = await startClient(host, id, spaceId, "B", b.vault, b.store);
+		clients.push(b2);
+		return { a, b2 };
+	}
+	const count = (v: MemoryVault) => [...v.files.keys()].filter((p) => p.startsWith("bulk/")).length;
+
+	it("pauses a mass delete made while closed; restoring brings the files back", async () => {
+		const { a, b2 } = await massDeleteWhileClosed();
+		await b2.engine.idle();
+		await a.engine.idle();
+		expect(count(a.vault)).toBe(24);
+		expect(count(b2.vault)).toBe(2);
+		b2.engine.restoreMissing();
+		await eventually(() => count(b2.vault) === 24, 8000, "files restored");
+		expect(count(a.vault)).toBe(24);
+	});
+
+	it("force full reconcile applies the paused deletes everywhere", async () => {
+		const { a, b2 } = await massDeleteWhileClosed();
+		await b2.engine.idle();
+		expect(count(a.vault)).toBe(24);
+		await b2.engine.forceReconcile();
+		await eventually(() => count(a.vault) === 2, 8000, "deletes reach A");
+		expect(count(b2.vault)).toBe(2);
+	});
+});

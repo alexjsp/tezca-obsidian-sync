@@ -451,6 +451,16 @@ export class SyncEngine {
 		}
 	}
 
+	/** Apply what the safety brake paused, in every mounted space. */
+	async forceReconcile(): Promise<void> {
+		for (const s of this.allSpaces()) await s.mirror.forceReconcile();
+	}
+
+	/** Bring back synced files missing from this device, in every mounted space. */
+	restoreMissing(): void {
+		for (const s of this.allSpaces()) s.mirror.restoreMissing();
+	}
+
 	/** Write this user's display name and colour into a share's member profiles. */
 	private writeProfile(space: SpaceSync) {
 		const p = this.opts.profile?.();

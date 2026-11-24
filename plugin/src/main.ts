@@ -109,6 +109,31 @@ export default class TezcaPlugin extends Plugin {
 
 		this.addCommand({ id: "reconnect", name: "Reconnect to sync host", callback: () => this.engine?.conn.reconnectNow() });
 		this.addCommand({ id: "pair-device", name: "Pair another device", callback: () => void this.pairDevice() });
+		this.addCommand({
+			id: "force-reconcile",
+			name: "Force full reconcile (apply changes the safety brake paused)",
+			callback: async () => {
+				const engine = this.engine;
+				if (!engine) return;
+				const ok = await confirm(
+					this.app,
+					"Force full reconcile?",
+					"Files missing or changed on this device will be deleted or overwritten on all your devices (deleted files stay in Recently deleted).",
+					"Apply",
+				);
+				if (!ok) return;
+				await engine.forceReconcile();
+				new Notice("Tezca: reconciled.");
+			},
+		});
+		this.addCommand({
+			id: "restore-missing",
+			name: "Restore files missing from this device",
+			callback: () => {
+				this.engine?.restoreMissing();
+				new Notice("Tezca: restoring missing files…");
+			},
+		});
 		this.addCommand({ id: "show-recovery-phrase", name: "Show recovery phrase", callback: () => void this.showRecoveryPhrase() });
 		this.addCommand({
 			id: "file-history",
