@@ -135,3 +135,25 @@ describe("removing someone from the host (real server)", () => {
 		expect(s.vault.files.has("Team/after.md")).toBe(false);
 	});
 });
+
+describe("changing someone's host role (real server)", () => {
+	it("a promoted member reconnects as an admin and can manage the host; the last admin can't step down", async () => {
+		const alex = await claimAdmin(server, "Alex");
+		const sam = await inviteMember(server, alex, "Sam");
+		const s = await startDevice(server, sam, "s");
+		devices.push(s);
+		const { HostRole } = await import("../../src/proto/tezca/v1/sync_pb");
+		await eventually(() => s.engine.primary.conn.authInfo?.role === HostRole.MEMBER, 10_000, "Sam online");
+		const { HostApi } = await import("../../src/core/setup");
+		const api = new HostApi(server.url);
+		await expect(api.listUsers(sam.id)).rejects.toThrow();
+
+		await api.setUserRole(alex.id, sam.id.signPk, "admin");
+		await eventually(() => s.engine.primary.conn.authInfo?.role === HostRole.ADMIN, 15_000, "Sam reconnected as an admin");
+		expect((await api.listUsers(sam.id)).length).toBe(2);
+
+		await api.setUserRole(sam.id, alex.id.signPk, "member");
+		await expect(api.setUserRole(sam.id, sam.id.signPk, "member")).rejects.toThrow(/at least one admin/);
+		await expect(api.listUsers(alex.id)).rejects.toThrow();
+	});
+});

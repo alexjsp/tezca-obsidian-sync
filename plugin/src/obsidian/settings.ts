@@ -224,7 +224,13 @@ export class TezcaSettingTab extends PluginSettingTab {
 			const isMe = u.sign_pk === me;
 			const name = isMe ? `${p.settings.displayName || "You"} (you)` : names.get(u.sign_pk) ?? `Key ${key}`;
 			const row = new Setting(el).setName(name).setDesc([u.role[0].toUpperCase() + u.role.slice(1), names.has(u.sign_pk) || isMe ? `key ${key}` : "", `joined ${new Date(u.created_at * 1000).toLocaleDateString()}`].filter(Boolean).join(" · "));
-			if (isMe) continue;
+			const admins = users.filter((x) => x.role === "admin").length;
+			if (isMe) {
+				if (admins > 1) row.addButton((b) => b.setButtonText("Step down as admin").onClick(() => void this.setRole(el, u, name, "member")));
+				continue;
+			}
+			if (u.role === "member") row.addButton((b) => b.setButtonText("Make admin").onClick(() => void this.setRole(el, u, name, "admin")));
+			if (u.role === "admin") row.addButton((b) => b.setButtonText("Remove admin").onClick(() => void this.setRole(el, u, name, "member")));
 			row.addButton((b) =>
 				b
 					.setButtonText("Remove")
@@ -246,6 +252,27 @@ export class TezcaSettingTab extends PluginSettingTab {
 						}
 					}),
 			);
+		}
+	}
+
+	/** Make someone (or yourself) an admin or a member, after confirming. */
+	private async setRole(el: HTMLElement, u: HostUser, name: string, role: "admin" | "member") {
+		const p = this.plugin;
+		if (!p.identity || !p.engine) return;
+		const isMe = u.sign_pk === b64u(p.identity.signPk);
+		const [title, body, action] =
+			role === "admin"
+				? [`Make ${name} an admin?`, "Admins can invite people to this host, see everyone who has an account here, and remove people or change their role, including yours.", "Make admin"]
+				: isMe
+					? ["Step down as admin?", "You'll keep your vaults and shared folders, but you won't be able to invite people to this host or manage its accounts any more. Another admin can make you an admin again.", "Step down"]
+					: [`Remove ${name} as an admin?`, "They keep their vaults and shared folders, but can no longer invite people to this host or manage its accounts.", "Remove admin"];
+		if (!(await confirm(this.app, title, body, action))) return;
+		try {
+			await p.engine.primary.api.setUserRole(p.identity, fromB64u(u.sign_pk), role);
+			new Notice(isMe ? "You're no longer an admin of this host" : role === "admin" ? `${name} is now an admin` : `${name} is no longer an admin`);
+			void this.renderPeople(el);
+		} catch (e) {
+			new Notice(`Couldn't change the role: ${(e as Error).message}`);
 		}
 	}
 

@@ -135,6 +135,11 @@ export class HostApi {
 		return (await this.call<{ users: HostUser[] }>("GET", "/api/users", undefined, id)).users;
 	}
 
+	/** Make someone with an account here an admin or a member (admins only). */
+	setUserRole(id: Identity, signPk: Uint8Array, role: "admin" | "member"): Promise<unknown> {
+		return this.call("PUT", `/api/users/${b64u(signPk)}/role`, { role }, id);
+	}
+
 	/** Remove someone's account from this host (admins only). */
 	removeUser(id: Identity, signPk: Uint8Array): Promise<unknown> {
 		return this.call("DELETE", `/api/users/${b64u(signPk)}`, undefined, id);

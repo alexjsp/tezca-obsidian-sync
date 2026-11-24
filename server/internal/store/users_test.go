@@ -85,3 +85,63 @@ func TestRemoveUser(t *testing.T) {
 		t.Fatalf("users: %+v %v", users, err)
 	}
 }
+
+func TestSetUserRole(t *testing.T) {
+	ctx := context.Background()
+	s := open(t)
+	if _, _, _, err := s.Init(ctx, "code"); err != nil {
+		t.Fatal(err)
+	}
+	admin, member, guest := pk(1), pk(2), pk(3)
+	if err := s.Claim(ctx, "code", admin, pk(11), 1_700_000_000_000); err != nil {
+		t.Fatal(err)
+	}
+	for _, u := range []struct {
+		pk   []byte
+		role int
+	}{{member, HostMember}, {guest, HostGuest}} {
+		tok, _ := s.CreateInvite(ctx, u.role, admin, 1, 1000)
+		if _, err := s.Redeem(ctx, tok, u.pk, pk(12), 2); err != nil {
+			t.Fatal(err)
+		}
+	}
+	role := func(p []byte) int {
+		u, err := s.GetUser(ctx, p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return u.Role
+	}
+
+	if err := s.SetUserRole(ctx, member, member, HostAdmin); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("non-admin promoting: %v", err)
+	}
+	if err := s.SetUserRole(ctx, admin, pk(9), HostAdmin); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unknown: %v", err)
+	}
+	if err := s.SetUserRole(ctx, admin, guest, HostAdmin); !errors.Is(err, ErrGuest) {
+		t.Fatalf("guest: %v", err)
+	}
+	if err := s.SetUserRole(ctx, admin, member, HostGuest); err == nil {
+		t.Fatal("demoting to guest should be refused")
+	}
+	if err := s.SetUserRole(ctx, admin, admin, HostMember); !errors.Is(err, ErrLastAdmin) {
+		t.Fatalf("last admin: %v", err)
+	}
+	if err := s.SetUserRole(ctx, admin, member, HostAdmin); err != nil || role(member) != HostAdmin {
+		t.Fatalf("promote: %v, role %d", err, role(member))
+	}
+	if err := s.SetUserRole(ctx, admin, member, HostAdmin); err != nil {
+		t.Fatalf("promoting again is a no-op: %v", err)
+	}
+	// With two admins, either can step down; the last one can't.
+	if err := s.SetUserRole(ctx, admin, admin, HostMember); err != nil || role(admin) != HostMember {
+		t.Fatalf("step down: %v", err)
+	}
+	if err := s.SetUserRole(ctx, admin, member, HostMember); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("former admin: %v", err)
+	}
+	if err := s.SetUserRole(ctx, member, member, HostMember); !errors.Is(err, ErrLastAdmin) {
+		t.Fatalf("last admin stepping down: %v", err)
+	}
+}

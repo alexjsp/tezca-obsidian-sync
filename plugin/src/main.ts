@@ -19,7 +19,7 @@ import { HostApi, ShareApi, createRootSpace, createSpace, httpResponse, linkPara
 import { SpaceSync } from "./core/space";
 import { IdbStore } from "./core/store";
 import { log } from "./core/util";
-import { SpaceKind } from "./proto/tezca/v1/sync_pb";
+import { HostRole, SpaceKind, type AuthOk } from "./proto/tezca/v1/sync_pb";
 import { DeletedFilesModal, HistoryModal } from "./obsidian/history-modal";
 import { ShareModal } from "./obsidian/share-modal";
 import { EditorBindings } from "./obsidian/editor";
@@ -371,6 +371,16 @@ export default class TezcaPlugin extends Plugin {
 		let lastConfigNotice = 0;
 		engine.sharesChanged.on(() => this.editors.refreshAccess());
 		engine.profileChanged.on(() => this.settingTab.refreshProfile());
+		// An admin can change this account's role; the host then reconnects us with the new one.
+		const syncRole = (ok: AuthOk) => {
+			const role = { [HostRole.ADMIN]: "admin", [HostRole.MEMBER]: "member", [HostRole.GUEST]: "guest" }[ok.role as number];
+			if (!role || role === this.settings.hostRole) return;
+			this.settings.hostRole = role;
+			void this.saveSettings();
+			this.settingTab.display();
+		};
+		engine.primary.conn.online.on(syncRole);
+		if (engine.primary.conn.authInfo) syncRole(engine.primary.conn.authInfo);
 		engine.notices.on((n) => {
 			if (n.kind === "config") {
 				// One reminder per burst of settings changes.

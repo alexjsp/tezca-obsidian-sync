@@ -103,3 +103,68 @@ func TestRemoveUser(t *testing.T) {
 		t.Fatalf("list after: %d %v", code, out)
 	}
 }
+
+func TestSetUserRole(t *testing.T) {
+	e := newEnv(t, nil)
+	admin := newIdent()
+	e.claim(admin)
+	member := e.join(admin, "member")
+	mc := e.dial(member, "m")
+	share := randSpaceID()
+	mc.createShare(1, share)
+	g := e.guest(member, share, "editor")
+	mc.expectSpaceChanged(share)
+
+	path := func(id *ident) string { return "/api/users/" + b64.EncodeToString(id.pk) + "/role" }
+	set := func(by, target *ident, role string) (int, map[string]any) {
+		return e.do("PUT", path(target), map[string]string{"role": role}, by)
+	}
+	hostRole := func(id *ident, device string) pb.HostRole {
+		c := e.rawDial(device)
+		c.startReader()
+		ch := c.recv().GetChallenge()
+		c.send(&pb.ClientFrame{Msg: &pb.ClientFrame_Hello{Hello: &pb.Hello{SignPk: id.pk, DeviceId: device, ProtocolVersion: 1}}})
+		c.send(&pb.ClientFrame{Msg: &pb.ClientFrame_Auth{Auth: &pb.Auth{Sig: id.sign(sigs.Auth(e.serverID, ch.Nonce, id.pk, device))}}})
+		ok := c.recv().GetAuthOk()
+		if ok == nil {
+			t.Fatalf("%s: no AuthOk", device)
+		}
+		return ok.Role
+	}
+
+	if code, out := set(member, member, "admin"); code != 403 {
+		t.Fatalf("member promotes self: %d %v", code, out)
+	}
+	if code, out := set(admin, member, "owner"); code != 400 {
+		t.Fatalf("bad role: %d %v", code, out)
+	}
+	if code, out := set(admin, g, "admin"); code != 409 {
+		t.Fatalf("guest: %d %v", code, out)
+	}
+	if code, out := set(admin, admin, "member"); code != 409 {
+		t.Fatalf("last admin steps down: %d %v", code, out)
+	}
+
+	// Promoting ends the member's live sessions; they come back as an admin and can manage users.
+	if code, out := set(admin, member, "admin"); code != 200 {
+		t.Fatalf("promote: %d %v", code, out)
+	}
+	mc.expectClosed()
+	if r := hostRole(member, "m2"); r != pb.HostRole_HOST_ROLE_ADMIN {
+		t.Fatalf("role after promotion: %v", r)
+	}
+	if code, out := e.do("GET", "/api/users", nil, member); code != 200 {
+		t.Fatalf("new admin lists users: %d %v", code, out)
+	}
+
+	// Now the original admin can step down, and is a member from then on.
+	if code, out := set(admin, admin, "member"); code != 200 {
+		t.Fatalf("step down: %d %v", code, out)
+	}
+	if r := hostRole(admin, "a2"); r != pb.HostRole_HOST_ROLE_MEMBER {
+		t.Fatalf("role after stepping down: %v", r)
+	}
+	if code, out := e.do("GET", "/api/users", nil, admin); code != 403 {
+		t.Fatalf("former admin lists users: %d %v", code, out)
+	}
+}

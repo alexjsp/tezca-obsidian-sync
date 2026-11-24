@@ -89,6 +89,7 @@ the URL used in generated links. Otherwise the URL is taken from `X-Forwarded-Pr
 | `POST /api/redeem` | body sig | `{token, sign_pk, box_pk, sig}` → `{server_id, role}`. Single-use. Re-redeeming with the same key is idempotent. |
 | `GET /api/users` | HTTP sig, admin | `{users:[{sign_pk, box_pk, role, created_at}]}`, oldest first. `role` is `"admin"`, `"member"` or `"guest"`; `created_at` is unix seconds. |
 | `DELETE /api/users/{sign_pk}` | HTTP sig, admin | `{}`. Removes a host user (see "Removing a user"). 404 unknown user, 409 if they're the last admin. |
+| `PUT /api/users/{sign_pk}/role` | HTTP sig, admin | `{role}` → `{role}`. Makes a host user an admin or a member (`"admin"` / `"member"`); their live sessions are closed so they reconnect with the new role (`AuthOk.role`). 400 other roles, 404 unknown user, 409 for a guest or if it would leave no admin. |
 | `PUT /api/spaces/{space_id}/blobs/{blob_id}` | HTTP sig, OWNER/EDITOR | Raw ciphertext body (`application/octet-stream`) → `{size}`. 201 if stored, 200 if it already existed (body discarded). 413 if larger than `max_blob_bytes + 40`. |
 | `GET /api/spaces/{space_id}/blobs/{blob_id}` | HTTP sig, member | → raw ciphertext, or 404. |
 | `HEAD /api/spaces/{space_id}/blobs/{blob_id}` | HTTP sig, member | 200 (with `Content-Length`) or 404. |

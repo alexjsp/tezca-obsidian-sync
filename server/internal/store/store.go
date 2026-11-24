@@ -31,6 +31,7 @@ var (
 	ErrBadKeys    = errors.New("keys do not match")
 	ErrQuota      = errors.New("quota exceeded")
 	ErrLastAdmin  = errors.New("last admin")
+	ErrGuest      = errors.New("guest")
 )
 
 // Host roles (match pb.HostRole).
@@ -586,4 +587,48 @@ func (s *Store) TakePairing(ctx context.Context, id string, now int64) ([]byte, 
 func (s *Store) PruneExpired(ctx context.Context, now int64) error {
 	_, err := s.w.ExecContext(ctx, `DELETE FROM pairings WHERE expires_at <= ?`, now)
 	return err
+}
+
+// SetUserRole makes target an admin or a member (role is HostAdmin or HostMember), on behalf
+// of the admin actor. Guests have no vault of their own on the host, so they can't be given
+// either role this way. Errors: ErrForbidden (actor isn't an admin), ErrNotFound (no such
+// user), ErrGuest (target is a guest), ErrLastAdmin (it would leave the host without an admin).
+func (s *Store) SetUserRole(ctx context.Context, actor, target []byte, role int) error {
+	if role != HostAdmin && role != HostMember {
+		return fmt.Errorf("role %d can't be set", role)
+	}
+	return s.tx(ctx, func(tx *sql.Tx) error {
+		var cur int
+		err := tx.QueryRow(`SELECT role FROM users WHERE sign_pk = ?`, actor).Scan(&cur)
+		if errors.Is(err, sql.ErrNoRows) || err == nil && cur != HostAdmin {
+			return ErrForbidden
+		}
+		if err != nil {
+			return err
+		}
+		err = tx.QueryRow(`SELECT role FROM users WHERE sign_pk = ?`, target).Scan(&cur)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if cur == HostGuest {
+			return ErrGuest
+		}
+		if cur == role {
+			return nil
+		}
+		if cur == HostAdmin {
+			var n int
+			if err := tx.QueryRow(`SELECT COUNT(*) FROM users WHERE role = ?`, HostAdmin).Scan(&n); err != nil {
+				return err
+			}
+			if n <= 1 {
+				return ErrLastAdmin
+			}
+		}
+		_, err = tx.Exec(`UPDATE users SET role = ? WHERE sign_pk = ?`, role, target)
+		return err
+	})
 }

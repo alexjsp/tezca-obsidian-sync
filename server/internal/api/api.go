@@ -144,6 +144,7 @@ func New(cfg Config) *API {
 	m.HandleFunc("POST /api/redeem", a.limited(a.redeem))
 	m.HandleFunc("GET /api/users", a.listUsers)
 	m.HandleFunc("DELETE /api/users/{sign_pk}", a.removeUser)
+	m.HandleFunc("PUT /api/users/{sign_pk}/role", a.setUserRole)
 	m.HandleFunc("POST /api/pairings", a.createPairing)
 	m.HandleFunc("GET /api/pairings/{id}", a.limited(a.takePairing))
 	if cfg.Blobs != nil {
@@ -701,6 +702,58 @@ func (a *API) removeUser(w http.ResponseWriter, r *http.Request) {
 			a.notifyMembers(r, sp)
 		}
 		writeJSON(w, http.StatusOK, map[string]any{})
+		return nil
+	}()
+	if err != nil {
+		a.fail(w, err)
+	}
+}
+
+// setUserRole: PUT /api/users/{sign_pk}/role {"role": "admin"|"member"} (admin). Their live
+// sessions are closed so they reconnect with the new role.
+func (a *API) setUserRole(w http.ResponseWriter, r *http.Request) {
+	err := func() error {
+		u, body, err := a.authenticate(r)
+		if err != nil {
+			return err
+		}
+		target, err := memberPath(r)
+		if err != nil {
+			return err
+		}
+		var q struct {
+			Role string `json:"role"`
+		}
+		if err := decode(body, &q); err != nil {
+			return err
+		}
+		var role int
+		switch q.Role {
+		case "admin":
+			role = store.HostAdmin
+		case "member":
+			role = store.HostMember
+		default:
+			return herr(http.StatusBadRequest, `role must be "admin" or "member"`)
+		}
+		err = a.cfg.Store.SetUserRole(r.Context(), u.SignPk, target, role)
+		switch {
+		case errors.Is(err, store.ErrForbidden):
+			return herr(http.StatusForbidden, "admin only")
+		case errors.Is(err, store.ErrNotFound):
+			return herr(http.StatusNotFound, "user not found")
+		case errors.Is(err, store.ErrGuest):
+			return herr(http.StatusConflict, "guests can't be made admins or members")
+		case errors.Is(err, store.ErrLastAdmin):
+			return herr(http.StatusConflict, "the server must keep at least one admin")
+		case err != nil:
+			return err
+		}
+		a.log.Info("user role changed", "user", base64.RawURLEncoding.EncodeToString(target), "role", q.Role, "by", base64.RawURLEncoding.EncodeToString(u.SignPk))
+		if a.cfg.Notify != nil {
+			a.cfg.Notify.DisconnectUser(target)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"role": q.Role})
 		return nil
 	}()
 	if err != nil {
