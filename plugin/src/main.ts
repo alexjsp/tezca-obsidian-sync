@@ -15,7 +15,7 @@ import {
 } from "./core/crypto";
 import { NO_CONFIG, anyConfig, type ConfigCategories } from "./core/config-sync";
 import { SyncEngine, type EngineStatus } from "./core/engine";
-import { HostApi, ShareApi, createRootSpace, createSpace, httpResponse, listSpaces, normalizeHost, parseDeepLink, waitOnline, type HttpFn } from "./core/setup";
+import { HostApi, ShareApi, createRootSpace, createSpace, httpResponse, linkParams, listSpaces, normalizeHost, parseDeepLink, waitOnline, type HttpFn } from "./core/setup";
 import { SpaceSync } from "./core/space";
 import { IdbStore } from "./core/store";
 import { log } from "./core/util";
@@ -611,9 +611,8 @@ export default class TezcaPlugin extends Plugin {
 		]);
 		if (!v?.link) return;
 		try {
-			const url = new URL(v.link.trim());
-			const params: Record<string, string> = {};
-			url.searchParams.forEach((val, k) => (params[k] = val));
+			const params = linkParams(v.link);
+			if (!params) throw new Error("not a setup link");
 			await this.handleDeepLink(params as unknown as ObsidianProtocolData);
 		} catch {
 			new Notice("Tezca: that doesn't look like a Tezca setup link.");

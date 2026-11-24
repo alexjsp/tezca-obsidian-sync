@@ -20,7 +20,7 @@ import { bytesFingerprint, identityFromSeed, initCrypto, randomBytes, type Ident
 import { SyncEngine } from "../../plugin/src/core/engine";
 import { contentModel, textOf } from "../../plugin/src/core/mirror";
 import { formatCanvas, parseCanvas } from "../../plugin/src/core/canvas";
-import { HostApi, createRootSpace, fetchHttp, waitOnline, type HttpFn } from "../../plugin/src/core/setup";
+import { HostApi, createRootSpace, fetchHttp, linkParams, waitOnline, type HttpFn } from "../../plugin/src/core/setup";
 import { MemoryStore } from "../../plugin/src/core/store";
 import { log } from "../../plugin/src/core/util";
 import { MemoryVault } from "../../plugin/src/core/vault";
@@ -247,9 +247,9 @@ async function run(seed: number, nClients: number, steps: number, bin: string): 
 			const sid = await owner.engine!.shareFolder("s", "shared");
 			for (let i = 0; i < 100 && !owner.engine!.shares.has(sid); i++) await sleep(50);
 			const link = await owner.engine!.createInvite(sid, "editor");
-			const u = new URL(link.replace("obsidian://tezca", "http://x/"));
+			const p = linkParams(link)!;
 			const joiner = clients.find((c) => c.user === 1)!;
-			await joiner.engine!.joinShare(u.searchParams.get("token")!, u.searchParams.get("k")!, async () => "s");
+			await joiner.engine!.joinShare(p.token, p.k, async () => "s");
 			for (let i = 0; i < 200 && !clients.every((c) => c.engine!.shares.has(sid)); i++) await sleep(50);
 			if (!clients.every((c) => c.engine!.shares.has(sid))) throw new Error("share setup failed");
 		}

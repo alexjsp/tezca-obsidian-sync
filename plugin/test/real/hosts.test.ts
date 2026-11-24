@@ -1,5 +1,6 @@
 // Cross-host shares and guests (M4) against two real Go servers: protocol.md "Cross-host shares and guests".
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { linkParams } from "../../src/core/setup";
 import { MemoryVault } from "../../src/core/vault";
 import { SpaceKind } from "../../src/proto/tezca/v1/sync_pb";
 import { eventually } from "../helpers";
@@ -32,8 +33,8 @@ async function device(server: RealServer, user: User, name: string, files: Recor
 
 const text = (d: Device, p: string) => d.vault.files.get(p);
 const params = (link: string) => {
-	const u = new URL(link.replace("obsidian://tezca", "http://x/"));
-	return { host: u.searchParams.get("host")!, token: u.searchParams.get("token")!, k: u.searchParams.get("k")! };
+	const p = linkParams(link)!;
+	return { host: p.host, token: p.token, k: p.k };
 };
 
 describe("cross-host shares and guests (two real servers)", () => {

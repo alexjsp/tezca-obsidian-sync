@@ -9,7 +9,7 @@ import WebSocket from "ws";
 import { HostConnection, type WSCtor } from "../../src/core/connection";
 import { identityFromSeed, randomBytes, type Identity } from "../../src/core/crypto";
 import { SyncEngine } from "../../src/core/engine";
-import { HostApi, createRootSpace, waitOnline } from "../../src/core/setup";
+import { HostApi, createRootSpace, linkParams, waitOnline } from "../../src/core/setup";
 import { MemoryStore } from "../../src/core/store";
 import { MemoryVault } from "../../src/core/vault";
 
@@ -141,8 +141,7 @@ export async function hostlessGuest(server: RealServer, name: string, inviteLink
 	const { ShareApi, createSpace } = await import("../../src/core/setup");
 	const { SpaceKind } = await import("../../src/proto/tezca/v1/sync_pb");
 	const id = identityFromSeed(randomBytes(32));
-	const u = new URL(inviteLink.replace("obsidian://tezca", "http://x/"));
-	await new ShareApi(new HostApi(server.url), id).redeemAsGuest(u.searchParams.get("token")!);
+	await new ShareApi(new HostApi(server.url), id).redeemAsGuest(linkParams(inviteLink)!.token);
 	const conn = new HostConnection({ host: server.url, identity: id, deviceId: "setup", clientVersion: "test", WebSocketImpl: NodeWS });
 	conn.start();
 	await waitOnline(conn);

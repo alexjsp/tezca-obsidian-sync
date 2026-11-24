@@ -1,6 +1,7 @@
 // Shared folders (M3) end to end against the real Go server: protocol.md "Shares (M3)".
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { bytesFingerprint } from "../../src/core/crypto";
+import { linkParams } from "../../src/core/setup";
 import { MemoryVault } from "../../src/core/vault";
 import { eventually } from "../helpers";
 import { claimAdmin, inviteMember, startDevice, startServer, type Device, type RealServer, type User } from "./server";
@@ -35,8 +36,8 @@ const idle = (...ds: Device[]) => Promise.all(ds.map((d) => d.engine.idle()));
 /** Create an invite on `owner` and have `joiner` mount it at `path`. */
 async function join(owner: Device, joiner: Device, spaceId: string, role: "editor" | "viewer", path: string) {
 	const link = await owner.engine.createInvite(spaceId, role);
-	const u = new URL(link.replace("obsidian://tezca", "http://x/"));
-	const mounted = await joiner.engine.joinShare(u.searchParams.get("token")!, u.searchParams.get("k")!, async () => path);
+	const p = linkParams(link)!;
+	const mounted = await joiner.engine.joinShare(p.token, p.k, async () => path);
 	expect(mounted).toBe(path);
 	await eventually(() => joiner.engine.shares.has(spaceId), 10_000, "share mounted");
 }

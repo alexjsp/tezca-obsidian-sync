@@ -178,9 +178,10 @@ export class ShareApi {
 		return `/api/spaces/${encodeURIComponent(spaceId)}`;
 	}
 
-	/** Deep link for a share invite (the secret only ever travels in the link). */
+	/** Link for a share invite (the secret only ever travels in the link's fragment). */
 	link(token: string, secret: Uint8Array): string {
-		return `obsidian://tezca?do=share&host=${encodeURIComponent(this.api.host)}&token=${encodeURIComponent(token)}&k=${b64u(secret)}`;
+		const host = normalizeHost(this.api.host);
+		return inviteLink(host, { do: "share", host, token, k: b64u(secret) });
 	}
 
 	createInvite(spaceId: string, role: "editor" | "viewer", keys: { epoch: number; wrapped: Uint8Array }[], ttlSeconds?: number) {
@@ -282,6 +283,34 @@ export function waitOnline(conn: HostConnection, timeoutMs = 20_000): Promise<vo
 			}
 		});
 	});
+}
+
+/**
+ * The link people send for a join or share invite: the host's invite page with the deep link's
+ * parameters in the fragment, which browsers never send to the server (protocol.md "Invite links").
+ */
+export function inviteLink(host: string, params: Record<string, string>): string {
+	return `${normalizeHost(host)}/invite#${new URLSearchParams(params).toString()}`;
+}
+
+/**
+ * The deep link parameters in a pasted setup link: the query of an obsidian://tezca?… link, or
+ * the fragment of an https://…/invite#… invite link. Null if it isn't a link with a `do`.
+ */
+export function linkParams(link: string): Record<string, string> | null {
+	let url: URL;
+	try {
+		url = new URL(link.trim());
+	} catch {
+		return null;
+	}
+	let search: URLSearchParams;
+	if (url.protocol === "obsidian:") search = url.searchParams;
+	else if (url.protocol === "https:" || url.protocol === "http:") search = new URLSearchParams(url.hash.replace(/^#/, ""));
+	else return null;
+	const params: Record<string, string> = {};
+	search.forEach((v, k) => (params[k] = v));
+	return params.do ? params : null;
 }
 
 export function parseDeepLink(params: Record<string, string>): {

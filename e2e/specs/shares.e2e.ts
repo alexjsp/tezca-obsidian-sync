@@ -62,7 +62,9 @@ describe("shares: a folder shared between two people", function () {
 		await alice.modal("Shared folder: Trip");
 		await alice.closeModals();
 		const link = await inviteLink("Can edit");
-		assert.match(link, /^obsidian:\/\/tezca\?do=share&/);
+		// The share host's invite page, with the invite (and its secret) only in the fragment.
+		assert.ok(link.startsWith(`${server.url}/invite#do=share&host=${encodeURIComponent(server.url)}&token=`), link);
+		assert.match(link, /&k=[\w-]+$/);
 
 		await bobJoins(link, "Shared/Trip");
 		await bob.waitForFile("Shared/Trip/Plan.md", "# Trip plan\n\n- Book flights\n");

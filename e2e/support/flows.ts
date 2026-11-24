@@ -36,6 +36,8 @@ export async function inviteToHost(admin: Device, member: Device) {
 	await admin.clickButton("Create invite");
 	const link = await admin.takeLink("Invite a member to this host");
 	await admin.closeSettings();
+	// Host invites are the host's invite page with the deep link in the fragment, pasted as is.
+	if (!/^https?:\/\/[^#]+\/invite#do=join&host=[^&]+&token=[^&]+$/.test(link)) throw new Error(`unexpected host invite link: ${link}`);
 	await pasteSetupLink(member, link);
 	await member.ackRecoveryPhrase();
 	await waitConfigured(member);
@@ -47,9 +49,14 @@ async function waitConfigured(d: Device) {
 	await d.browser.waitUntil(async () => (await d.status()).configured, { timeout: 20_000, timeoutMsg: `${d.name} didn't connect` });
 }
 
-/** Open a tezca:// deep link on `d` (what Obsidian does when you open an obsidian://tezca?… URL). */
+/**
+ * Open a setup link on `d` (what Obsidian does when you open an obsidian://tezca?… URL). Takes the
+ * deep link itself or an https://…/invite#… invite link, whose fragment holds the same params.
+ */
 export async function openDeepLink(d: Device, link: string) {
-	const params = Object.fromEntries(new URL(link.replace(/^obsidian:\/\/tezca\??/, "http://x/?")).searchParams);
+	const u = new URL(link);
+	const params = Object.fromEntries(u.protocol === "obsidian:" ? u.searchParams : new URLSearchParams(u.hash.slice(1)));
+	if (!params.do) throw new Error(`not a setup link: ${link}`);
 	await d.exec(({ plugins }, params) => {
 		void plugins.tezcaSync.handleDeepLink({ action: "tezca", ...params });
 	}, params);
