@@ -92,10 +92,19 @@ export class HostApi {
 
 	private async call<T>(method: string, path: string, body?: unknown, identity?: Identity): Promise<T> {
 		const bodyStr = body === undefined ? "" : JSON.stringify(body);
-		const headers: Record<string, string> = {};
-		if (body !== undefined) headers["Content-Type"] = "application/json";
-		if (identity) headers["Authorization"] = httpAuth(identity, method, path, utf8(bodyStr));
-		const res = await this.http({ method, url: this.host + path, headers, body: body === undefined ? undefined : bodyStr });
+		const send = () => {
+			const headers: Record<string, string> = {};
+			if (body !== undefined) headers["Content-Type"] = "application/json";
+			if (identity) headers["Authorization"] = httpAuth(identity, method, path, utf8(bodyStr));
+			return this.http({ method, url: this.host + path, headers, body: body === undefined ? undefined : bodyStr });
+		};
+		let res = await send();
+		// The host accepts each signature once. Signatures carry a whole-second timestamp, so the
+		// same request twice within a second looks like a replay: sign it again a moment later.
+		if (identity && res.status === 409 && /duplicate request/.test(res.text ?? "")) {
+			await new Promise((r) => setTimeout(r, 1100));
+			res = await send();
+		}
 		if (res.status < 200 || res.status >= 300) {
 			const msg = (res.json as { error?: string } | null)?.error ?? res.text ?? `HTTP ${res.status}`;
 			throw new HttpError(res.status, msg);

@@ -95,3 +95,15 @@ describe("server identity pinning (real server)", () => {
 		expect(status).toBe("unauthorized");
 	});
 });
+
+describe("signed requests (real server)", () => {
+	it("two identical requests in the same second both go through (the host accepts each signature once)", async () => {
+		const alex = await claimAdmin(server, "Alex");
+		const { HostApi } = await import("../../src/core/setup");
+		const api = new HostApi(server.url);
+		const [a, b] = await Promise.all([api.createInvite(alex.id), api.createInvite(alex.id)]);
+		expect(a.token).toBeTruthy();
+		expect(b.token).toBeTruthy();
+		expect(a.token).not.toBe(b.token);
+	});
+});
