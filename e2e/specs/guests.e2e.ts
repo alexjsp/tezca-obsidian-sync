@@ -1,11 +1,12 @@
 // Joining a shared folder without being a member of its host: Carol has no Tezca setup at all
 // (joins as a guest), Dave runs his own host (joins across hosts).
 import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
 import { Device } from "../support/device";
 import { claimHost, openDeepLink } from "../support/flows";
 import { TezcaServer } from "../support/server";
 import { waitConverged } from "../support/vault";
-import { sleep } from "../support/wait";
+import { sleep, waitFor } from "../support/wait";
 
 describe("guests and cross-host shares", function () {
 	let aliceHost: TezcaServer;
@@ -15,7 +16,7 @@ describe("guests and cross-host shares", function () {
 	let dave: Device;
 
 	before(async function () {
-		[aliceHost, daveHost] = await Promise.all([TezcaServer.start(), TezcaServer.start()]);
+		[aliceHost, daveHost] = await Promise.all([TezcaServer.start({ TEZCA_GUEST_QUOTA_MB: "1" }), TezcaServer.start()]);
 		[alice, carol, dave] = await Promise.all([Device.launch("alice"), Device.launch("carol", { mobile: true }), Device.launch("dave")]);
 		await claimHost(alice, aliceHost);
 		await claimHost(dave, daveHost);
@@ -60,6 +61,21 @@ describe("guests and cross-host shares", function () {
 		await carol.openSettings();
 		await carol.find(".setting-item-description", { text: /You're using Tezca as a guest/ });
 		await carol.closeSettings();
+	});
+
+	it("a guest over their storage quota is told, and the file stays on their device", async function () {
+		await carol.writeBinary("Club/Small photo.bin", randomBytes(200 * 1024));
+		await alice.waitForFile("Club/Small photo.bin");
+		await carol.writeBinary("Club/Huge video.bin", randomBytes(2 * 1024 * 1024));
+		await waitFor(async () => (await carol.noticesSeen()).some((n) => n.includes("Huge video.bin") && n.includes("storage on this host is full")), {
+			what: "a quota notice on Carol's device",
+			detail: () => carol.noticesSeen(),
+		});
+		assert.equal(alice.exists("Club/Huge video.bin"), false);
+		// Alice (a member, not a guest) isn't limited.
+		await alice.writeBinary("Club/Alice video.bin", randomBytes(2 * 1024 * 1024));
+		await carol.waitForFile("Club/Alice video.bin");
+		await carol.delete("Club/Huge video.bin");
 	});
 
 	it("someone with their own host joins across hosts", async function () {

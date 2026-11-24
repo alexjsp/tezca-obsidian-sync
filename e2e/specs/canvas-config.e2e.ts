@@ -167,6 +167,36 @@ describe("canvas and settings sync", function () {
 			await waitFor(async () => (await viewNodes(laptop)).length === 3, { what: "laptop's view to show the new card" });
 			assert.deepEqual(JSON.parse(mac.read("Board.canvas")!), JSON.parse(laptop.read("Board.canvas")!));
 		});
+
+		it("syncs a connection's label added on one device while the other moves a card", async function () {
+			await Promise.all([
+				mac.exec(({ app }) => {
+					const canvas = app.workspace.getLeavesOfType("canvas")[0].view.canvas;
+					const edge = canvas.edges.get("e1");
+					edge.setData({ ...edge.getData(), label: "leads to", color: "4" });
+					canvas.requestSave();
+				}),
+				laptop.exec(({ app }) => {
+					const canvas = app.workspace.getLeavesOfType("canvas")[0].view.canvas;
+					canvas.nodes.get("a1").moveTo({ x: -200, y: 50 });
+					canvas.requestSave();
+				}),
+			]);
+			for (const d of [mac, laptop])
+				await waitFor(
+					() => {
+						const c = JSON.parse(d.read("Board.canvas") ?? "{}");
+						const e = c.edges?.find((x: { id: string }) => x.id === "e1");
+						const a = c.nodes?.find((x: { id: string }) => x.id === "a1");
+						return e?.label === "leads to" && e?.color === "4" && a?.x === -200 && a?.y === 50;
+					},
+					{ what: `${d.name}: label and move`, detail: () => d.read("Board.canvas") },
+				);
+			await waitFor(
+				() => laptop.exec(({ app }) => app.workspace.getLeavesOfType("canvas")[0].view.canvas.edges.get("e1")?.label === "leads to"),
+				{ what: "the laptop's view to show the label" },
+			);
+		});
 	});
 
 	describe("settings sync", function () {
@@ -191,11 +221,18 @@ describe("canvas and settings sync", function () {
 				app.customCss.setCssEnabledStatus("e2e-test", true);
 				app.hotkeyManager.setHotkeys("editor:toggle-bold", [{ modifiers: ["Mod", "Shift"], key: "B" }]);
 				await app.hotkeyManager.save();
+				// A core plugin's settings (Daily notes), as its settings tab saves them.
+				const daily = app.internalPlugins.getPluginById("daily-notes");
+				daily.instance.options = { ...(daily.instance.options ?? {}), folder: "Journal" };
+				await daily.instance.saveSettings?.();
+				if (!(await app.vault.adapter.exists(`${app.vault.configDir}/daily-notes.json`)))
+					await app.vault.adapter.write(`${app.vault.configDir}/daily-notes.json`, JSON.stringify({ folder: "Journal" }));
 			});
 			await phone.waitForFile(".obsidian/snippets/e2e-test.css", "body { --e2e-marker: 1; }\n");
 			await phone.waitForFile(".obsidian/app.json", (c) => JSON.parse(c).showLineNumber === true);
 			await phone.waitForFile(".obsidian/appearance.json", (c) => (JSON.parse(c).enabledCssSnippets ?? []).includes("e2e-test"));
 			await phone.waitForFile(".obsidian/hotkeys.json", (c) => "editor:toggle-bold" in JSON.parse(c));
+			await phone.waitForFile(".obsidian/daily-notes.json", (c) => JSON.parse(c).folder === "Journal");
 			await waitFor(async () => (await phone.noticesSeen()).some((n) => n.includes("settings changed on another device")), {
 				what: "phone to say settings changed",
 			});
