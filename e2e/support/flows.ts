@@ -2,11 +2,19 @@
 import type { Device } from "./device";
 import type { TezcaServer } from "./server";
 
-/** Paste a setup link into the "Set up with a link" form on an unconfigured device. */
+/** Paste a setup link into the "Set up with a link" form on an unconfigured device, and confirm it. */
 export async function pasteSetupLink(d: Device, link: string) {
 	await d.openSettings();
 	await d.clickButton("Paste link");
 	await d.submitForm("Connect to a Tezca host", link);
+	await confirmLinkPrompt(d);
+}
+
+/** Accept the "which host is this link for" confirmation every setup link shows first. */
+export async function confirmLinkPrompt(d: Device) {
+	const m = await d.modal(/^(Claim this Tezca host|Connect to your account|Join )/);
+	await d.click((await m.$(".setting-item button")) as unknown as WebdriverIO.Element);
+	await d.browser.pause(300);
 }
 
 /** Claim a fresh host from `d` (becomes its admin, with a new synced vault). */
@@ -24,7 +32,10 @@ export async function pairDevice(from: Device, to: Device) {
 	await from.clickButton("Pair device");
 	const link = await from.takeLink("Pair another device");
 	await from.closeSettings();
+	const vault = await from.exec(({ plugins, app }) => plugins.tezcaSync.engine?.space?.meta?.name ?? app.vault.getName());
 	await pasteSetupLink(to, link);
+	// Pairing always shows the account's synced vaults; the one from the link is first.
+	await to.choose("Choose a synced vault", vault);
 	await waitConfigured(to);
 	await to.closeSettings();
 	await to.waitSynced();
@@ -60,6 +71,7 @@ export async function openDeepLink(d: Device, link: string) {
 	await d.exec(({ plugins }, params) => {
 		void plugins.tezcaSync.handleDeepLink({ action: "tezca", ...params });
 	}, params);
+	await confirmLinkPrompt(d);
 }
 
 /** Set the name shown to others (settings → Profile → Edit…). */

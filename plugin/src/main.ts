@@ -587,6 +587,8 @@ export default class TezcaPlugin extends Plugin {
 		const link = parseDeepLink(params as unknown as Record<string, string>);
 		if (!link) return new Notice("Tezca: unrecognised link");
 		try {
+			// Nothing is contacted until the user has seen which host the link is for.
+			if (!(await this.confirmLink(link.action, link.host))) return;
 			if (link.action === "claim") await this.claimHost(link.host, link.code ?? "");
 			else if (link.action === "join") await this.joinHost(link.host, link.token ?? "");
 			else if (link.action === "share") await this.joinShare(link.host, link.token ?? "", link.k ?? "");
@@ -597,24 +599,49 @@ export default class TezcaPlugin extends Plugin {
 		}
 	}
 
+	/**
+	 * Before acting on a setup link: say which host it's for and what will happen, warn about
+	 * plain HTTP, and (when this vault is already connected) say what it's leaving.
+	 */
+	private async confirmLink(action: "claim" | "join" | "share" | "pair", host: string): Promise<boolean> {
+		const where = hostName(host);
+		const texts = {
+			claim: ["Claim this Tezca host?", `You'll become the admin of ${where}, and this vault will sync to it. Only continue if you set up this host yourself.`, "Claim host"],
+			join: [`Join ${where}?`, `You've been invited to an account on ${where}. This vault will sync to it, end-to-end encrypted.`, "Join"],
+			pair: [
+				"Connect to your account?",
+				`This pairing link signs this vault into a Tezca account on ${where} and syncs it there. Only continue if you created the link on one of your own devices in the last few minutes. If someone sent it to you, cancel: whoever owns that account could read everything in this vault.`,
+				"Continue",
+			],
+			share: [`Join a shared folder on ${where}?`, `You'll become a member of a shared folder on ${where}, and choose where it goes in your vault.`, "Join"],
+		}[action];
+		let [title, message, ok] = texts;
+		if (action === "share" && !this.isConfigured) return true; // the guest flow asks, with more detail
+		if (action !== "share" && this.isConfigured)
+			message += ` This vault is currently connected to ${hostName(this.settings.host)}: continuing disconnects it there (your files stay). Make sure you have that account's recovery phrase.`;
+		if (!isSecureHost(host)) {
+			message += ` Warning: ${where} doesn't use HTTPS, so anyone on the network between you could read or change what's sent, including the keys that unlock your notes.`;
+			ok = `${ok} without HTTPS`;
+		}
+		return confirm(this.app, title, message, ok);
+	}
+
 	private async confirmReplace(): Promise<boolean> {
 		if (!this.isConfigured) return true;
 		return confirm(
 			this.app,
 			"Replace sync setup?",
-			"This vault is already connected to a Tezca host. Continuing will disconnect it and connect to the new one. Local files are kept.",
+			`This vault is connected to ${hostName(this.settings.host)}. Continuing disconnects it there and connects it to the account you're restoring. Your files stay.`,
 		);
 	}
 
 	async claimHost(host: string, code: string) {
-		if (!(await this.confirmReplace())) return;
 		const id = newIdentity();
 		await this.api(host).claim(code, id);
 		await this.finishNewIdentity(host, id, "admin");
 	}
 
 	async joinHost(host: string, token: string) {
-		if (!(await this.confirmReplace())) return;
 		const existing = this.identity ?? (await this.loadIdentity());
 		let id = existing;
 		if (!id) id = newIdentity();
@@ -635,19 +662,27 @@ export default class TezcaPlugin extends Plugin {
 		conn.start();
 		try {
 			await waitOnline(conn);
-			let spaceId = preselectSpace ?? "";
-			if (!spaceId) {
-				const roots = (await listSpaces(conn)).filter((s) => s.kind === SpaceKind.ROOT);
-				const choices = roots.map((s) => {
+			// Always let the user see and choose the synced vault (a pairing link only suggests one).
+			const roots = (await listSpaces(conn)).filter((s) => s.kind === SpaceKind.ROOT);
+			const fp = hex(id.signPk).slice(0, 16).match(/.{4}/g)!.join(" ");
+			const choices = roots
+				.sort((a, b) => (a.spaceId === preselectSpace ? -1 : b.spaceId === preselectSpace ? 1 : 0))
+				.map((s) => {
 					const name = new SpaceSync(conn, null as never, id, s).meta?.name ?? s.spaceId;
-					return { label: name, detail: "Sync this vault with the existing synced vault", value: s.spaceId };
+					return {
+						label: name,
+						detail: s.spaceId === preselectSpace ? "The synced vault from the pairing link" : "Sync this vault with this existing synced vault",
+						value: s.spaceId,
+						cta: s.spaceId === preselectSpace,
+					};
 				});
-				choices.push({ label: `New synced vault "${this.app.vault.getName()}"`, detail: "Upload this vault as a new synced vault", value: "" });
-				const picked = roots.length ? await choose(this.app, "Choose a synced vault", "Which synced vault should this Obsidian vault use?", choices) : "";
-				if (picked === null) return;
-				spaceId = picked;
-				if (!spaceId) spaceId = (await createRootSpace(conn, id, this.app.vault.getName())).spaceId;
-			}
+			choices.push({ label: `New synced vault "${this.app.vault.getName()}"`, detail: "Upload this vault as a new synced vault", value: "", cta: false });
+			const picked = roots.length
+				? await choose(this.app, "Choose a synced vault", `Account ${fp} on ${hostName(host)}. Which of its synced vaults should this Obsidian vault use? (The account key is shown in Tezca's settings on your other devices, under Advanced.)`, choices)
+				: "";
+			if (picked === null) return;
+			let spaceId = picked;
+			if (!spaceId) spaceId = (await createRootSpace(conn, id, this.app.vault.getName())).spaceId;
 			await this.stopEngine();
 			await this.saveIdentity(id);
 			this.settings.host = host;
@@ -663,7 +698,6 @@ export default class TezcaPlugin extends Plugin {
 	}
 
 	async acceptPairing(host: string, pairingId: string, secret: string) {
-		if (!(await this.confirmReplace())) return;
 		const payload = await this.api(host).fetchPairing(pairingId, secret);
 		const id = identityFromSeed(fromB64u(payload.seed));
 		if (payload.displayName && !this.settings.displayName) this.settings.displayName = payload.displayName;
@@ -762,5 +796,35 @@ export default class TezcaPlugin extends Plugin {
 
 	identityFingerprint(): string {
 		return this.identity ? hex(this.identity.signPk).slice(0, 16) : "";
+	}
+}
+
+/** A host URL as people read it: "notes.example.com". */
+function hostName(host: string): string {
+	try {
+		return new URL(host).host;
+	} catch {
+		return host;
+	}
+}
+
+/** HTTPS, or plain HTTP only on this machine or a private network. */
+function isSecureHost(host: string): boolean {
+	try {
+		const u = new URL(host);
+		if (u.protocol === "https:") return true;
+		const h = u.hostname;
+		return (
+			h === "localhost" ||
+			h.endsWith(".local") ||
+			/^127\./.test(h) ||
+			/^10\./.test(h) ||
+			/^192\.168\./.test(h) ||
+			/^172\.(1[6-9]|2\d|3[01])\./.test(h) ||
+			/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(h) || // Tailscale
+			h === "[::1]"
+		);
+	} catch {
+		return false;
 	}
 }

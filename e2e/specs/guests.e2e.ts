@@ -47,7 +47,6 @@ describe("guests and cross-host shares", function () {
 	it("someone without Tezca joins as a guest; only the shared folder syncs", async function () {
 		carol.writeOnDisk("Carol's diary.md", "Not for sharing.\n");
 		await openDeepLink(carol, await invite());
-		await carol.choose("Join a shared folder", "Join");
 		await carol.ackRecoveryPhrase();
 		await carol.submitForm('Join "Club"', "Club", "Join");
 		await carol.waitForFile("Club/Rules.md", "1. Be nice.\n");
