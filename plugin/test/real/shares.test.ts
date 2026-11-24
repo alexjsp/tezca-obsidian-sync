@@ -142,6 +142,26 @@ describe("shared folders (real server)", () => {
 		expect(a.engine.members(spaceId).some((m) => !m.isMe)).toBe(false);
 	});
 
+	it("rejoining a share after leaving it works (at a new folder)", async () => {
+		const alex = await claimAdmin(server, "Alex");
+		const sam = await inviteMember(server, alex, "Sam");
+		const a = await device(alex, "a", { "Trip/itinerary.md": "day 1" });
+		const spaceId = await a.engine.shareFolder("Trip", "Trip");
+		await eventually(() => a.engine.shares.has(spaceId), 10_000, "mounted");
+		await idle(a);
+		const s = await device(sam, "s");
+		await join(a, s, spaceId, "editor", "Trip");
+		await eventually(() => text(s, "Trip/itinerary.md") === "day 1", 10_000, "joined");
+		await s.engine.leaveShare(spaceId);
+		await eventually(() => !s.engine.shares.has(spaceId), 10_000, "left");
+		await a.vault.userWrite("Trip/itinerary.md", "day 1\nday 2");
+		await join(a, s, spaceId, "editor", "Trip again");
+		await eventually(() => text(s, "Trip again/itinerary.md") === "day 1\nday 2", 10_000, "rejoined");
+		await s.vault.userWrite("Trip again/new.md", "from Sam");
+		await eventually(() => text(a, "Trip/new.md") === "from Sam", 10_000, "Sam's edit reaches Alex");
+		expect(s.engine.mounts!.all().map((m) => m.path)).toEqual(["Trip again"]);
+	});
+
 	it("deleting the mount folder (even while closed) unmounts it without deleting anything for others", async () => {
 		const alex = await claimAdmin(server, "Alex");
 		const sam = await inviteMember(server, alex, "Sam");

@@ -350,8 +350,13 @@ export class SyncEngine {
 		sh.mirror.suspend();
 		await sh.mirror.stop();
 		await sh.space.stop();
-		// The folder's files become private files again (left the share, or unmounted).
-		if (rescan && this.root?.mirror && (await this.opts.vault.exists(sh.mount))) await this.root.mirror.rescan(sh.mount);
+		if (rescan) {
+			// Left (or lost) for good: a later join starts afresh, rather than reading the old mount's
+			// state as "its folder was deleted while closed" and unmounting again.
+			await this.opts.store.delete(`mirror/${spaceId}`);
+			// The folder's files become private files again.
+			if (this.root?.mirror && (await this.opts.vault.exists(sh.mount))) await this.root.mirror.rescan(sh.mount);
+		}
 		this.sharesChanged.emit();
 		this.emitStatus();
 	}
