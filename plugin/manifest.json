@@ -1,7 +1,7 @@
 {
   "id": "tezca-sync",
   "name": "Tezca Sync",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "minAppVersion": "1.8.0",
   "description": "Live, end-to-end encrypted, self-hosted sync with real-time collaboration.",
   "author": "Tezca",
