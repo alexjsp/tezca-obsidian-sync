@@ -81,6 +81,7 @@ the URL used in generated links. Otherwise the URL is taken from `X-Forwarded-Pr
 | `GET /healthz` | none | `ok` |
 | `GET /api/info` | none (optional HTTP sig) | `{server_id, protocol_version, claimed, name, max_blob_bytes, role?}` (`role` only for a valid signature, see M4) |
 | `GET /` | none | Setup landing page. When unclaimed, it tells the operator to run `docker compose logs` to find the claim link. |
+| `GET /invite` | none | Invite page for join and share links (see "Invite links"). Static: the invite is in the fragment, read by `/invite.js`. Its CSP allows only same-origin scripts (`/invite.js`, `/qrcode.js`); `Referrer-Policy: no-referrer`. |
 | `GET /claim?code=…` | claim code | HTML page with the `obsidian://` claim link + QR code. 404 if the server is claimed or the code is wrong. |
 | `POST /api/claim` | body sig | `{code, sign_pk, box_pk, sig}` → `{server_id, role:"admin"}`. One-time. `sig = sign(sigInput("redeem", server_id, code, sign_pk, box_pk))`. |
 | `POST /api/invites` | HTTP sig, admin | `{role:"member", ttl_seconds?}` → `{token, expires_at, link}` |
@@ -112,6 +113,21 @@ Plugin deep links (handled by the plugin, not the server):
 - `obsidian://tezca?do=claim&host=<url>&code=<code>`
 - `obsidian://tezca?do=join&host=<url>&token=<token>`
 - `obsidian://tezca?do=pair&host=<url>&id=<pairing id>&k=<b64u pairing secret>`
+- `obsidian://tezca?do=share&host=<url>&token=<token>&k=<b64u secret>` (see "Share invites")
+
+#### Invite links
+
+Join and share invites are sent to people who may not have the plugin yet, so the link people
+share is the host's invite page with the deep link's parameters in the URL fragment:
+`<host url>/invite#<params>`, e.g. `https://sync.example.com/invite#do=join&host=…&token=…`.
+Browsers never send the fragment to the server. The page's script reads it, and shows an
+**Open in Obsidian** button for `obsidian://tezca?<params>`, setup steps, a QR code of the page's
+own URL (drawn in the browser) and a copy-link fallback. It makes no requests with the fragment.
+A host that serves a tampered page could read the fragment, so a share's `k` is only as safe as
+the host serving its invite page; that's the same host that stores the share.
+
+Clients accept either form wherever a link is pasted: an `obsidian://tezca?…` link's query, or an
+`http(s)://…` link's fragment. Claim and pairing links stay `obsidian://` links.
 
 ## WebSocket session
 
@@ -253,7 +269,7 @@ The owner makes a single-use, expiring link. A random 32-byte `secret` travels o
 (`k=`). Each epoch key the invitee needs is wrapped for the link as
 `nonce(24) ‖ xchacha20poly1305(space_key[epoch], AD = sigInput("ad-invite", space_id, u32(epoch)), key = BLAKE2b-256(key = secret, msg = "tezca/v1/share-invite"))`.
 
-Link: `obsidian://tezca?do=share&host=<url>&token=<token>&k=<b64u secret>`.
+Link: `<host url>/invite#do=share&host=<url>&token=<token>&k=<b64u secret>` (see "Invite links"), which opens `obsidian://tezca?do=share&host=<url>&token=<token>&k=<b64u secret>`.
 
 | Method & path | Auth | Body → Response |
 |---|---|---|

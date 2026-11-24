@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -173,8 +174,10 @@ func TestInvitesRedeem(t *testing.T) {
 	}
 	tok := out["token"].(string)
 	link := out["link"].(string)
-	if !strings.HasPrefix(link, "obsidian://tezca?do=join&host=") || !strings.HasSuffix(link, "&token="+tok) {
-		t.Fatalf("link: %s", link)
+	// The invite page on this host, with the deep link's parameters in the fragment.
+	wantLink := e.srv.URL + "/invite#do=join&host=" + url.QueryEscape(e.srv.URL) + "&token=" + tok
+	if link != wantLink {
+		t.Fatalf("link: %s\nwant %s", link, wantLink)
 	}
 	if exp := int64(out["expires_at"].(float64)); exp < time.Now().Unix()+3500 || exp > time.Now().Unix()+3700 {
 		t.Fatalf("expires_at: %d", exp)

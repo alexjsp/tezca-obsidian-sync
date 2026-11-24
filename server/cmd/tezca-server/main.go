@@ -134,6 +134,10 @@ func run() error {
 	listen := env("TEZCA_LISTEN", ":8080")
 	publicURL := strings.TrimRight(os.Getenv("TEZCA_PUBLIC_URL"), "/")
 	name := env("TEZCA_SERVER_NAME", "Tezca")
+	pluginRepo := env("TEZCA_PLUGIN_REPO", api.DefaultPluginRepo)
+	if !api.ValidPluginRepo(pluginRepo) {
+		return fmt.Errorf("TEZCA_PLUGIN_REPO must be a GitHub owner/repo, e.g. %s", api.DefaultPluginRepo)
+	}
 	maxBlobMB, err := envInt("TEZCA_MAX_BLOB_MB", 100)
 	if err != nil {
 		return err
@@ -171,7 +175,7 @@ func run() error {
 
 	hub := ws.NewHub(ws.Config{Store: st, ServerID: serverID, Logger: log})
 	handler := api.New(api.Config{
-		Store: st, Hub: hub, Notify: hub, ServerID: serverID, PublicURL: publicURL, Name: name, Logger: log,
+		Store: st, Hub: hub, Notify: hub, ServerID: serverID, PublicURL: publicURL, Name: name, PluginRepo: pluginRepo, Logger: log,
 		Blobs: blobStore, MaxBlobBytes: int64(maxBlobMB) << 20, GuestQuotaBytes: int64(guestQuotaMB) << 20,
 	})
 

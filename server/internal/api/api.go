@@ -35,6 +35,8 @@ const (
 	MaxInvite       = 30 * 24 * time.Hour
 	MinInvite       = time.Minute
 	ProtocolVersion = ws.ProtocolVersion
+	// DefaultPluginRepo is the GitHub repo people add in BRAT to install the plugin.
+	DefaultPluginRepo = "alexjsp/tezca-obsidian-sync"
 )
 
 // Config configures the API.
@@ -44,8 +46,11 @@ type Config struct {
 	ServerID  string
 	PublicURL string // optional; otherwise derived from X-Forwarded-Proto / Host
 	Name      string
-	Logger    *slog.Logger
-	Now       func() time.Time
+	// PluginRepo is the plugin's GitHub "owner/repo", which the setup pages tell people to add in
+	// BRAT (TEZCA_PLUGIN_REPO; default DefaultPluginRepo).
+	PluginRepo string
+	Logger     *slog.Logger
+	Now        func() time.Time
 
 	Blobs        blobs.BlobStore // blob bytes; blob routes are disabled if nil
 	MaxBlobBytes int64           // max plaintext blob size (default DefaultMaxBlob)
@@ -82,6 +87,9 @@ func New(cfg Config) *API {
 		cfg.MaxBlobBytes = DefaultMaxBlob
 	}
 	cfg.PublicURL = strings.TrimRight(cfg.PublicURL, "/")
+	if !ValidPluginRepo(cfg.PluginRepo) {
+		cfg.PluginRepo = DefaultPluginRepo
+	}
 	a := &API{cfg: cfg, log: cfg.Logger, mux: http.NewServeMux()}
 	m := a.mux
 	m.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "ok") })
@@ -92,6 +100,9 @@ func New(cfg Config) *API {
 	m.HandleFunc("GET /{$}", a.landing)
 	m.HandleFunc("GET /claim", a.claimPage)
 	m.HandleFunc("GET /claim/qr.png", a.claimQR)
+	m.HandleFunc("GET /invite", a.invitePage)
+	m.HandleFunc("GET /invite.js", serveInviteJS)
+	m.HandleFunc("GET /qrcode.js", serveQRCodeJS)
 	m.HandleFunc("POST /api/claim", a.claim)
 	m.HandleFunc("POST /api/invites", a.createInvite)
 	m.HandleFunc("GET /api/invites", a.listInvites)
@@ -157,9 +168,11 @@ func ClaimLink(publicURL, code string) string {
 	return "obsidian://tezca?do=claim&host=" + url.QueryEscape(publicURL) + "&code=" + url.QueryEscape(code)
 }
 
-// JoinLink is the obsidian:// deep link for a host invite.
+// JoinLink is the link for a host invite: this host's /invite page with the deep link's
+// parameters in the fragment, which browsers never send to the server (protocol.md "Invite
+// links"). The page's "Open in Obsidian" button is obsidian://tezca?<fragment>.
 func JoinLink(publicURL, token string) string {
-	return "obsidian://tezca?do=join&host=" + url.QueryEscape(publicURL) + "&token=" + url.QueryEscape(token)
+	return publicURL + "/invite#do=join&host=" + url.QueryEscape(publicURL) + "&token=" + url.QueryEscape(token)
 }
 
 // ───────────── helpers ─────────────

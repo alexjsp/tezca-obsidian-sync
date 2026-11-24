@@ -37,6 +37,7 @@ For Docker, see [`deploy/README.md`](../deploy/README.md).
 | `TEZCA_LISTEN` | `:8080` | Listen address (plain HTTP). |
 | `TEZCA_PUBLIC_URL` | (unset) | Public base URL used in claim and invite links. If unset, the URL comes from `X-Forwarded-Proto`/`X-Forwarded-Host`/`Host`. |
 | `TEZCA_SERVER_NAME` | `Tezca` | Display name on the setup pages and in `/api/info`. |
+| `TEZCA_PLUGIN_REPO` | `alexjsp/tezca-obsidian-sync` | GitHub `owner/repo` of the Obsidian plugin. The home and invite pages tell people to add it in BRAT, and link to it. |
 | `TEZCA_CLAIM_CODE` | (random) | Presets the claim code while the server is unclaimed. |
 | `TEZCA_DEBUG` | (unset) | Any value enables debug logging. |
 | `TEZCA_MAX_BLOB_MB` | `100` | Largest attachment (plaintext MiB). Uploads over this + 40 bytes of encryption overhead get 413. Shown to clients as `max_blob_bytes` in `/api/info`. |
@@ -69,7 +70,7 @@ internal/sigs      sigInput construction + Ed25519 verification (golden-vector t
 internal/store     SQLite schema, migrations, all queries (single writer conn + read pool), snapshot retention
 internal/blobs     blob byte storage: filesystem (temp file + rename) and S3 (minio-go)
 internal/ws        WebSocket sessions, hub, per-doc ordering, space feeds
-internal/api       HTTP API (incl. share invites, membership, key rotation), signed-request auth, CORS, claim/landing pages, QR
+internal/api       HTTP API (incl. share invites, membership, key rotation), signed-request auth, CORS, claim/landing/invite pages, QR
 internal/pb        generated protobuf code (proto/gen.sh)
 internal/e2e       end-to-end tests (httptest server + real WebSocket clients)
 ```
