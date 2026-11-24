@@ -131,6 +131,9 @@ func run() error {
 	slog.SetDefault(log)
 
 	dataDir := env("TEZCA_DATA_DIR", "./data")
+	if err := dropPrivileges(dataDir); err != nil {
+		return err
+	}
 	listen := env("TEZCA_LISTEN", ":8080")
 	publicURL := strings.TrimRight(os.Getenv("TEZCA_PUBLIC_URL"), "/")
 	name := env("TEZCA_SERVER_NAME", "Tezca")
