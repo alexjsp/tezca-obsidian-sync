@@ -1,5 +1,9 @@
 packages:
   - plugin
   - sim
+  - e2e
 allowBuilds:
   esbuild: true
+  classic-level: false
+  edgedriver: false
+  geckodriver: false

@@ -44,3 +44,7 @@ release version: test
   git push origin main
   gh release create {{quote(version)}} --target main --title {{quote(version)}} --generate-notes \
     plugin/main.js plugin/manifest.json plugin/styles.css
+
+# Drive real (sandboxed) Obsidian end-to-end; slow, run when a change needs it. `just e2e core` runs specs/*core*
+e2e filter="": build
+  cd e2e && E2E_FILTER={{quote(filter)}} pnpm exec mocha
