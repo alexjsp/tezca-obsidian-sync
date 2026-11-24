@@ -283,6 +283,7 @@ export class SyncEngine {
 			if (sh.host !== l.host) continue;
 			const i = l.infos.get(sh.spaceId);
 			if (i) sh.space.applyInfo(i);
+			this.writeProfile(sh.space); // e.g. just made an editor: viewers can't publish their name
 		}
 		// Mounted shares on this host we're no longer a member of: unmount (files stay as private files).
 		for (const m of this.mounts?.all() ?? []) {

@@ -97,6 +97,22 @@ describe("shared folders (real server)", () => {
 		await eventually(() => text(v, "Docs/x.md") === "owner edit", 10_000, "owner edit reaches viewer");
 	});
 
+	it("a viewer made an editor publishes their name to the member list", async () => {
+		const alex = await claimAdmin(server, "Alex");
+		const vic = await inviteMember(server, alex, "Vic");
+		const a = await device(alex, "a", { "Docs/x.md": "original" });
+		const spaceId = await a.engine.shareFolder("Docs", "Docs");
+		await eventually(() => a.engine.shares.has(spaceId), 10_000, "mounted");
+		await idle(a);
+		const v = await device(vic, "v");
+		await join(a, v, spaceId, "viewer", "Docs");
+		await idle(v);
+		const named = () => a.engine.members(spaceId).some((m) => m.name === "Vic");
+		expect(named()).toBe(false); // viewers can't write their profile
+		await a.engine.setRole(spaceId, vic.id.signPk, "editor");
+		await eventually(named, 10_000, "Vic's name appears");
+	});
+
 	it("removing a member rotates the key: the rest keep syncing, the removed member keeps their copy privately", async () => {
 		const alex = await claimAdmin(server, "Alex");
 		const sam = await inviteMember(server, alex, "Sam");

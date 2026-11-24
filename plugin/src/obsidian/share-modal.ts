@@ -54,7 +54,9 @@ export class ShareModal extends Modal {
 		contentEl.createEl("h4", { text: "Members" });
 		for (const m of this.engine.members(this.spaceId)) {
 			const label = `${m.name ?? `Member ${shortKey(m.signPk)}`}${m.isMe ? " (you)" : ""}`;
-			const s = new Setting(contentEl).setName(label).setDesc(m.name ? `Key ${shortKey(m.signPk)}` : "Hasn't opened the share yet");
+			// Names come from each member's profile in the shared folder; viewers can't write there.
+			const unnamed = m.role === SpaceRole.VIEWER ? "View-only members' names aren't shown" : "Hasn't opened the shared folder yet";
+			const s = new Setting(contentEl).setName(label).setDesc(m.name ? `Key ${shortKey(m.signPk)}` : `${unnamed} · key ${shortKey(m.signPk)}`);
 			if (m.color) s.nameEl.style.color = m.color;
 			if (isOwner && !m.isMe) {
 				s.addDropdown((d) =>
