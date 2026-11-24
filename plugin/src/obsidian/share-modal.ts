@@ -5,6 +5,7 @@ import { b64u, fingerprint } from "../core/crypto";
 import type { ShareInviteInfo, ShareRole } from "../core/setup";
 import { SpaceRole } from "../proto/tezca/v1/sync_pb";
 import { LinkModal, confirm } from "./modals";
+import { renderAvatar } from "./avatar";
 
 const ROLE: Record<number, ShareRole> = { [SpaceRole.OWNER]: "owner", [SpaceRole.EDITOR]: "editor", [SpaceRole.VIEWER]: "viewer" };
 
@@ -58,6 +59,7 @@ export class ShareModal extends Modal {
 			const unnamed = m.role === SpaceRole.VIEWER ? "View-only members' names aren't shown" : "Hasn't opened the shared folder yet";
 			const s = new Setting(contentEl).setName(label).setDesc(m.name ? `Key ${shortKey(m.signPk)}` : `${unnamed} · key ${shortKey(m.signPk)}`);
 			if (m.color) s.nameEl.style.color = m.color;
+			renderAvatar(s.nameEl.createSpan({ prepend: true } as never), { name: m.name ?? "?", color: m.color ?? "var(--text-faint)", avatar: m.avatar });
 			if (isOwner && !m.isMe) {
 				s.addDropdown((d) =>
 					d

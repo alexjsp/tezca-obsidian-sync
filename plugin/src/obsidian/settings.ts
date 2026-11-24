@@ -1,4 +1,5 @@
-import { App, PluginSettingTab, Setting } from "obsidian";
+import { App, Notice, PluginSettingTab, Setting } from "obsidian";
+import { pickImage, renderAvatar, toAvatar } from "./avatar";
 import type TezcaPlugin from "../main";
 import { ShareModal } from "./share-modal";
 import { log } from "../core/util";
@@ -9,6 +10,16 @@ export class TezcaSettingTab extends PluginSettingTab {
 		private readonly plugin: TezcaPlugin,
 	) {
 		super(app, plugin);
+	}
+
+	private avatarEl: HTMLElement | null = null;
+
+	/** Redraw the profile picture preview (after it changes here or on another device). */
+	refreshProfile(): void {
+		const el = this.avatarEl;
+		const p = this.plugin;
+		if (!el || !el.isConnected) return;
+		renderAvatar(el, { name: p.settings.displayName || p.settings.deviceName, color: p.settings.color, avatar: p.engine?.myAvatar() });
 	}
 
 	display(): void {
@@ -113,6 +124,32 @@ export class TezcaSettingTab extends PluginSettingTab {
 			}
 
 			containerEl.createEl("h3", { text: "Presence" });
+			const pic = new Setting(containerEl)
+				.setName("Profile picture")
+				.setDesc("Shown on your cursor and to the members of your shared folders. Applies to all your devices.");
+			this.avatarEl = pic.controlEl.createSpan({ cls: "tezca-avatar tezca-avatar-large" });
+			this.refreshProfile();
+			pic.addButton((b) =>
+				b.setButtonText("Choose…").onClick(async () => {
+					const file = await pickImage(containerEl.ownerDocument);
+					if (!file) return;
+					try {
+						p.engine?.setAvatar(await toAvatar(file, containerEl.ownerDocument));
+						this.refreshProfile();
+					} catch (e) {
+						new Notice(`Tezca: ${(e as Error).message}`);
+					}
+				}),
+			);
+			pic.addExtraButton((b) =>
+				b
+					.setIcon("trash")
+					.setTooltip("Remove picture")
+					.onClick(() => {
+						p.engine?.setAvatar(null);
+						this.refreshProfile();
+					}),
+			);
 			new Setting(containerEl)
 				.setName("Display name")
 				.setDesc("Shown next to your cursor, and to the other members of your shared folders.")

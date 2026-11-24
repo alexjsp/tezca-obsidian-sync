@@ -2,7 +2,8 @@
 import { Compartment, EditorState, Transaction, type Extension } from "@codemirror/state";
 import { EditorView, ViewPlugin, type PluginValue, type ViewUpdate } from "@codemirror/view";
 import { editorInfoField } from "obsidian";
-import { yCollab, ySyncAnnotation } from "y-codemirror.next";
+import { YSyncConfig, ySync, ySyncAnnotation, ySyncFacet } from "y-codemirror.next";
+import { remoteCursors, type CursorUser } from "./remote-cursors";
 import type { DocSync } from "../core/doc-sync";
 import type { SpaceSync } from "../core/space";
 import { textOf } from "../core/mirror";
@@ -23,6 +24,19 @@ const remoteNotUndoable = EditorState.transactionExtender.of((tr) =>
 export interface PresenceUser {
 	name: string;
 	color: string;
+	/** Our signing key (b64u), so others can look up our profile picture. */
+	pk?: string;
+}
+
+/** A profile picture for `user` from a space's member profiles (written by `SyncEngine`). */
+export function avatarIn(space: SpaceSync | null, user: CursorUser): string | null {
+	if (!space || !user.pk) return null;
+	try {
+		const p = JSON.parse(space.index.ydoc.getMap<string>("members").get(user.pk) ?? "{}") as { avatar?: string };
+		return typeof p.avatar === "string" && p.avatar.startsWith("data:image/") ? p.avatar : null;
+	} catch {
+		return null;
+	}
 }
 
 interface Binding {
@@ -153,14 +167,15 @@ export class EditorBindings {
 			}
 			const awareness = doc.getAwareness();
 			const user = this.getUser();
-			awareness.setLocalStateField("user", { name: user.name, color: user.color, colorLight: user.color + "33" });
+			awareness.setLocalStateField("user", { name: user.name, color: user.color, colorLight: user.color + "33", pk: user.pk });
 			// View-only: no typing, and nothing else (e.g. Obsidian reloading the file after another app
 			// changed it) may change the text either, except the synced doc itself. The mirror puts the
 			// file on disk back.
 			const readOnly = space.canWrite()
 				? []
 				: [EditorState.readOnly.of(true), EditorView.editable.of(false), EditorState.changeFilter.of((tr) => tr.annotation(ySyncAnnotation) !== undefined)];
-			view.dispatch({ effects: collabCompartment.reconfigure([yCollab(ytext, awareness, { undoManager: false }), readOnly]) });
+			const collab = [ySyncFacet.of(new YSyncConfig(ytext, awareness)), ySync, remoteCursors((u) => avatarIn(space, u))];
+			view.dispatch({ effects: collabCompartment.reconfigure([collab, readOnly]) });
 			placeholder.docId = docId;
 			placeholder.doc = doc;
 			placeholder.space = space;
@@ -197,15 +212,15 @@ export class EditorBindings {
 	}
 
 	/** Other people/devices in this view's note (from encrypted awareness). */
-	presence(view: EditorView): { name: string; color: string }[] {
+	presence(view: EditorView): { name: string; color: string; avatar: string | null }[] {
 		const b = this.bindings.get(view);
 		if (!b?.doc) return [];
 		const aw = b.doc.getAwareness();
-		const out: { name: string; color: string }[] = [];
+		const out: { name: string; color: string; avatar: string | null }[] = [];
 		aw.getStates().forEach((state, clientId) => {
 			if (clientId === aw.clientID) return;
-			const u = (state as { user?: { name?: string; color?: string } }).user;
-			if (u?.name) out.push({ name: u.name, color: u.color ?? "var(--text-muted)" });
+			const u = (state as { user?: CursorUser }).user;
+			if (u?.name) out.push({ name: u.name, color: u.color ?? "var(--text-muted)", avatar: avatarIn(b.space, u) });
 		});
 		return out;
 	}
@@ -226,7 +241,7 @@ export class EditorBindings {
 	updateUser(): void {
 		const user = this.getUser();
 		for (const b of this.bindings.values()) {
-			b.doc?.getAwareness().setLocalStateField("user", { name: user.name, color: user.color, colorLight: user.color + "33" });
+			b.doc?.getAwareness().setLocalStateField("user", { name: user.name, color: user.color, colorLight: user.color + "33", pk: user.pk });
 		}
 	}
 }

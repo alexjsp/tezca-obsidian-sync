@@ -23,6 +23,7 @@ import { SpaceKind } from "./proto/tezca/v1/sync_pb";
 import { DeletedFilesModal, HistoryModal } from "./obsidian/history-modal";
 import { ShareModal } from "./obsidian/share-modal";
 import { EditorBindings } from "./obsidian/editor";
+import { renderAvatar } from "./obsidian/avatar";
 import { LinkModal, RecoveryPhraseModal, choose, confirm, form } from "./obsidian/modals";
 import { TezcaSettingTab } from "./obsidian/settings";
 import { ObsidianVault } from "./obsidian/vault-adapter";
@@ -83,7 +84,11 @@ export default class TezcaPlugin extends Plugin {
 
 		this.editors = new EditorBindings(
 			() => this.engine,
-			() => ({ name: this.settings.displayName || this.settings.deviceName, color: this.settings.color }),
+			() => ({
+				name: this.settings.displayName || this.settings.deviceName,
+				color: this.settings.color,
+				pk: this.identity ? b64u(this.identity.signPk) : undefined,
+			}),
 		);
 		this.registerEditorExtension(this.editors.extension());
 
@@ -315,6 +320,7 @@ export default class TezcaPlugin extends Plugin {
 		});
 		let lastConfigNotice = 0;
 		engine.sharesChanged.on(() => this.editors.refreshAccess());
+		engine.profileChanged.on(() => this.settingTab.refreshProfile());
 		engine.notices.on((n) => {
 			if (n.kind === "config") {
 				// One reminder per burst of settings changes.
@@ -400,11 +406,7 @@ export default class TezcaPlugin extends Plugin {
 		el.toggle(people.length > 0);
 		if (!people.length) return;
 		el.setAttr("aria-label", `Also here: ${people.map((p) => p.name).join(", ")}`);
-		for (const p of people.slice(0, 5)) {
-			const dot = el.createSpan({ cls: "tezca-avatar", text: (p.name.trim()[0] ?? "?").toUpperCase() });
-			dot.style.backgroundColor = p.color;
-			dot.setAttr("title", p.name);
-		}
+		for (const p of people.slice(0, 5)) renderAvatar(el.createSpan(), p);
 		if (people.length > 5) el.createSpan({ text: ` +${people.length - 5}` });
 	}
 

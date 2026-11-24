@@ -61,6 +61,7 @@ export interface ShareMember {
 	role: SpaceRole;
 	name?: string;
 	color?: string;
+	avatar?: string;
 	isMe: boolean;
 }
 
@@ -99,6 +100,8 @@ export class SyncEngine {
 	readonly notices = new Emitter<MirrorNotice>();
 	/** Fires when shares are mounted, unmounted or change role/membership. */
 	readonly sharesChanged = new Emitter<void>();
+	/** Our profile (picture) changed, here or on another of our devices. */
+	readonly profileChanged = new Emitter<void>();
 	/** The root space; its mirror is null for a hostless guest's profile space (no private files). */
 	root: (Omit<MountedSpace, "mirror"> & { mirror: DiskMirror | null }) | null = null;
 	readonly shares = new Map<string, MountedSpace>();
@@ -207,6 +210,16 @@ export class SyncEngine {
 		if (this.stopped) return;
 		await mirror?.initialReconcile();
 		this.offs.push(this.mounts.onChange(() => this.syncMounts()));
+		// Our profile picture lives in our own space; when it changes (set on another device too),
+		// republish it to the shared folders.
+		const myProfile = space.index.ydoc.getMap<string>("members");
+		const onProfile = (ev: { keysChanged: Set<string> }) => {
+			if (!ev.keysChanged.has(this.myKey)) return;
+			this.updateProfile();
+			this.profileChanged.emit();
+		};
+		myProfile.observe(onProfile);
+		this.offs.push(() => myProfile.unobserve(onProfile));
 		this.syncMounts();
 		log.info(`space ${spaceId} ready`);
 		this.emitStatus();
@@ -462,17 +475,44 @@ export class SyncEngine {
 		for (const s of this.allSpaces()) s.mirror.restoreMissing();
 	}
 
-	/** Write this user's display name and colour into a share's member profiles. */
+	private get myKey(): string {
+		return b64u(this.opts.identity.signPk);
+	}
+
+	/**
+	 * Our profile picture (a small data URL), or undefined. It's kept in our own space's member
+	 * profiles (so every device of ours has it) and copied into each shared folder's.
+	 */
+	myAvatar(): string | undefined {
+		try {
+			const p = JSON.parse(this.root?.space.index.ydoc.getMap<string>("members").get(this.myKey) ?? "{}") as { avatar?: string };
+			return typeof p.avatar === "string" ? p.avatar : undefined;
+		} catch {
+			return undefined;
+		}
+	}
+
+	/** Set (or with null, remove) our profile picture on all our devices and shared folders. */
+	setAvatar(dataUrl: string | null): void {
+		const space = this.root?.space;
+		if (!space) throw new Error("Sync isn't running");
+		const members = space.index.ydoc.getMap<string>("members");
+		const v = JSON.stringify(dataUrl ? { avatar: dataUrl } : {});
+		if (members.get(this.myKey) !== v) space.index.ydoc.transact(() => members.set(this.myKey, v), LOCAL_ORIGIN);
+		// (The members observer republishes to shares.)
+	}
+
+	/** Write this user's display name, colour and picture into a share's member profiles. */
 	private writeProfile(space: SpaceSync) {
 		const p = this.opts.profile?.();
 		if (!p || !space.canWrite()) return;
 		const members = space.index.ydoc.getMap<string>("members");
-		const key = b64u(this.opts.identity.signPk);
-		const v = JSON.stringify(p);
-		if (members.get(key) !== v) space.index.ydoc.transact(() => members.set(key, v), LOCAL_ORIGIN);
+		const avatar = this.myAvatar();
+		const v = JSON.stringify(avatar ? { ...p, avatar } : p);
+		if (members.get(this.myKey) !== v) space.index.ydoc.transact(() => members.set(this.myKey, v), LOCAL_ORIGIN);
 	}
 
-	/** Re-publish the profile (after the user changes name or colour). */
+	/** Re-publish the profile (after the user changes name, colour or picture). */
 	updateProfile(): void {
 		for (const sh of this.shares.values()) this.writeProfile(sh.space);
 	}
@@ -551,13 +591,13 @@ export class SyncEngine {
 		const me = b64u(this.opts.identity.signPk);
 		return info.members.map((m) => {
 			const k = b64u(m.signPk);
-			let prof: { name?: string; color?: string } = {};
+			let prof: { name?: string; color?: string; avatar?: string } = {};
 			try {
 				prof = JSON.parse(profiles?.get(k) ?? "{}");
 			} catch {
 				/* ignore */
 			}
-			return { signPk: m.signPk, role: m.role, name: prof.name, color: prof.color, isMe: k === me };
+			return { signPk: m.signPk, role: m.role, name: prof.name, color: prof.color, avatar: prof.avatar, isMe: k === me };
 		});
 	}
 
