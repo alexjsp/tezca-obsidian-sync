@@ -62,6 +62,25 @@ describe("sync engine (mock host)", () => {
 		await a.vault.rename("proj", "archive/proj");
 		await converged(a, b);
 		expect(snapshotVault(b.vault)).toEqual({ "archive/proj/a.md": "A", "archive/proj/sub/b.md": "B" });
+		// The old folder doesn't linger on the other device.
+		await eventually(() => !b.vault.folders.has("proj") && !b.vault.folders.has("proj/sub"));
+		expect([...b.vault.folders].sort()).toEqual(["archive", "archive/proj", "archive/proj/sub"]);
+	});
+
+	it("removes a folder renamed elsewhere while this device was closed (and doesn't re-add it)", async () => {
+		const { host, id, spaceId, a, b } = await pair({ a: { "proj/a.md": "A", "proj/sub/b.md": "B", "keep/c.md": "C" } });
+		await converged(a, b);
+		await b.engine.stop();
+		await a.vault.rename("proj", "archive/proj");
+		await eventually(() => a.engine.currentStatus().unsent === 0);
+		const b2 = await startClient(host, id, spaceId, "B", b.vault, b.store);
+		clients.push(b2);
+		await converged(a, b2);
+		expect(snapshotVault(b2.vault)).toEqual({ "archive/proj/a.md": "A", "archive/proj/sub/b.md": "B", "keep/c.md": "C" });
+		await eventually(() => !b2.vault.folders.has("proj"));
+		await converged(a, b2);
+		expect([...a.vault.folders].sort()).toEqual(["archive", "archive/proj", "archive/proj/sub", "keep"]);
+		expect([...b2.vault.folders].sort()).toEqual(["archive", "archive/proj", "archive/proj/sub", "keep"]);
 	});
 
 	it("merges concurrent edits to the same note", async () => {

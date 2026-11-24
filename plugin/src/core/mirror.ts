@@ -433,6 +433,36 @@ export class DiskMirror {
 			this.expectedRenames.delete(to);
 			throw e;
 		}
+		// The folders it left may now be empty leftovers of a folder renamed elsewhere.
+		const parts = from.split("/");
+		for (let i = parts.length - 1; i > 0; i--) this.vacated.add(parts.slice(0, i).join("/"));
+	}
+
+	/** Folders that sync moved files out of (see `removeVacatedFolders`). */
+	private vacated = new Set<string>();
+
+	/**
+	 * A folder renamed on another device arrives as its files moving; the old folder stays behind,
+	 * empty. Remove such folders, deepest first, when empty and no synced folder lives there.
+	 */
+	private async removeVacatedFolders(): Promise<void> {
+		if (!this.vacated.size) return;
+		const dirs = [...this.vacated].sort((a, b) => b.length - a.length);
+		this.vacated.clear();
+		const live = new Set(this.index.live().filter((e) => e.kind === "folder").map((e) => canonicalPath(e.path)));
+		for (const vp of dirs) {
+			const rel = this.toRel(vp);
+			if (!rel || live.has(canonicalPath(rel)) || !this.inScope(vp, "folder")) continue;
+			if (this.opts.excluded?.().some((m) => m === vp || m.startsWith(vp + "/"))) continue;
+			if (!(await this.vault.exists(vp))) continue;
+			const prefix = vp + "/";
+			if ((await this.vault.list()).some((i) => i.path.startsWith(prefix))) continue;
+			try {
+				await this.selfRemove(vp);
+			} catch (err) {
+				log.debug("folder remove failed", err);
+			}
+		}
 	}
 
 	// ───────────── conflict artifacts ─────────────
@@ -549,7 +579,12 @@ export class DiskMirror {
 				plan.push(() => this.handleRemoteDelete(tomb, vp));
 			} else plan.push(() => this.importNewFile(vp));
 		}
-		for (const [, vp] of diskFolders) plan.push(() => this.importNewFolder(vp));
+		for (const [, vp] of diskFolders)
+			plan.push(async () => {
+				// Left behind by a folder renamed elsewhere while we were away (its files just moved out).
+				if (this.vacated.has(vp)) return;
+				await this.importNewFolder(vp);
+			});
 
 		// 5. tombstones with baselines whose file is gone everywhere: forget the baseline
 		for (const e of this.index.all()) if (e.deleted && this.state.baselines[e.id] && !diskFiles.has(canonicalPath(e.path))) this.dropBaseline(e.id);
@@ -573,6 +608,7 @@ export class DiskMirror {
 				else log.error("reconcile step failed", e);
 			}
 		}
+		await this.removeVacatedFolders();
 		this.brakeEngaged = false;
 		await this.saveState();
 	}
@@ -1265,6 +1301,7 @@ export class DiskMirror {
 						else throw e;
 					}
 				}
+				await this.removeVacatedFolders();
 			});
 		}, SWEEP_DEBOUNCE_MS);
 	}
