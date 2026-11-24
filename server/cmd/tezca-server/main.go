@@ -176,7 +176,7 @@ func run() error {
 		return fmt.Errorf("init store: %w", err)
 	}
 
-	hub := ws.NewHub(ws.Config{Store: st, ServerID: serverID, Logger: log})
+	hub := ws.NewHub(ws.Config{Store: st, ServerID: serverID, Logger: log, GuestQuotaBytes: int64(guestQuotaMB) << 20})
 	handler := api.New(api.Config{
 		Store: st, Hub: hub, Notify: hub, ServerID: serverID, PublicURL: publicURL, Name: name, PluginRepo: pluginRepo, Logger: log,
 		Blobs: blobStore, MaxBlobBytes: int64(maxBlobMB) << 20, GuestQuotaBytes: int64(guestQuotaMB) << 20,

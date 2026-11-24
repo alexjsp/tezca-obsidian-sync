@@ -177,12 +177,12 @@ func (a *API) putBlob(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 
-		// Guest quota (M4): refuse up front what can't fit, stop the stream once it overflows,
+		// Guest quota (M4; blobs, updates and snapshots count): refuse up front what can't fit, stop the stream once it overflows,
 		// and re-check when recording (concurrent uploads), dropping the bytes if it's over.
 		var quota int64
 		if isNew && u.Role == store.HostGuest && a.cfg.GuestQuotaBytes > 0 {
 			quota = a.cfg.GuestQuotaBytes
-			used, err := a.cfg.Store.UserBlobBytes(ctx, u.SignPk)
+			used, err := a.cfg.Store.UserBytes(ctx, u.SignPk)
 			if err != nil {
 				return err
 			}

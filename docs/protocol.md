@@ -90,7 +90,7 @@ the URL used in generated links. Otherwise the URL is taken from `X-Forwarded-Pr
 | `PUT /api/spaces/{space_id}/blobs/{blob_id}` | HTTP sig, OWNER/EDITOR | Raw ciphertext body (`application/octet-stream`) → `{size}`. 201 if stored, 200 if it already existed (body discarded). 413 if larger than `max_blob_bytes + 40`. |
 | `GET /api/spaces/{space_id}/blobs/{blob_id}` | HTTP sig, member | → raw ciphertext, or 404. |
 | `HEAD /api/spaces/{space_id}/blobs/{blob_id}` | HTTP sig, member | 200 (with `Content-Length`) or 404. |
-| `POST /api/pairings` | HTTP sig | `{ciphertext}` (b64u, ≤ 64 KiB) → `{id, expires_at}`. TTL 15 min. |
+| `POST /api/pairings` | HTTP sig | `{ciphertext}` (b64u, ≤ 64 KiB) → `{id, expires_at}`. TTL 15 min. At most 5 unexpired pairings per user; more gets 429. |
 | `GET /api/pairings/{id}` | none | `{ciphertext}` once, then 404 (deleted on read). |
 | `GET /ws` | WS handshake below | WebSocket upgrade |
 
@@ -390,9 +390,13 @@ Guests:
 - can do everything a member of a space can within the spaces they belong to (their role there
   still applies);
 - can create pairings (to add their own devices);
-- have a blob quota: the total size of blobs they uploaded on this host is capped at
-  `TEZCA_GUEST_QUOTA_MB` (default 1024; 0 = unlimited). An upload over it gets 507 with
-  `{"error":"guest storage quota exceeded"}`. Blobs that already exist (dedup) don't count again.
+- have a storage quota of `TEZCA_GUEST_QUOTA_MB` (default 1024; 0 = unlimited). It counts the
+  blobs they uploaded on this host plus the retained updates and snapshots they authored, in any
+  space (their PROFILE space and the shares where they're an editor). Updates and snapshots that
+  the history policy prunes stop counting, so usage goes down again over time. A blob upload over
+  it gets 507 with `{"error":"guest storage quota exceeded"}`; a `PushUpdate` or `PutSnapshot`
+  over it gets `Error{TOO_LARGE, "guest storage quota exceeded"}` and isn't stored. Blobs that
+  already exist (dedup) don't count again.
 
 `GET /api/info` adds `role` when the request carries a valid HTTP signature (`"admin"`, `"member"`,
 `"guest"`), so a client can tell how a host sees it.

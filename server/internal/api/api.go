@@ -54,7 +54,8 @@ type Config struct {
 
 	Blobs        blobs.BlobStore // blob bytes; blob routes are disabled if nil
 	MaxBlobBytes int64           // max plaintext blob size (default DefaultMaxBlob)
-	// GuestQuotaBytes caps the total size of blobs each guest uploads (0 = unlimited).
+	// GuestQuotaBytes caps what each guest stores: the blobs they upload plus the updates and
+	// snapshots they author (store.UserBytes; 0 = unlimited).
 	GuestQuotaBytes int64
 
 	Notify Notifier // live sessions (the ws Hub); optional
@@ -540,8 +541,12 @@ func (a *API) createPairing(w http.ResponseWriter, r *http.Request) {
 		if len(q.Ciphertext) > MaxPairing {
 			return herr(http.StatusRequestEntityTooLarge, "ciphertext exceeds 64 KiB")
 		}
-		exp := a.cfg.Now().Add(PairingTTL).Unix()
-		id, err := a.cfg.Store.CreatePairing(r.Context(), u.SignPk, q.Ciphertext, exp)
+		now := a.cfg.Now()
+		exp := now.Add(PairingTTL).Unix()
+		id, err := a.cfg.Store.CreatePairing(r.Context(), u.SignPk, q.Ciphertext, now.Unix(), exp)
+		if errors.Is(err, store.ErrQuota) {
+			return herr(http.StatusTooManyRequests, "too many open pairings; use or wait for one to expire")
+		}
 		if err != nil {
 			return err
 		}

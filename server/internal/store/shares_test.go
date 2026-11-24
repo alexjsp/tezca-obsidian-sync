@@ -52,7 +52,7 @@ func TestMigrateFromV2(t *testing.T) {
 		}
 		var v int
 		s.r.QueryRow(`PRAGMA user_version`).Scan(&v)
-		if v != len(migrations) || v != 5 {
+		if v != len(migrations) || v != 6 {
 			t.Fatalf("user_version %d", v)
 		}
 		if got, err := s.GetSpace(ctx, sp, pk(1)); err != nil || got.Role != SpaceOwner || len(got.Keys) != 1 {

@@ -42,7 +42,7 @@ For Docker, see [`deploy/README.md`](../deploy/README.md).
 | `PUID` / `PGID` | (unset) | When the container is started as root (`--user 0:0`, as the Unraid template does), the server gives the data directory to this user and group and then runs as them. Unraid uses `99` / `100`. |
 | `TEZCA_DEBUG` | (unset) | Any value enables debug logging. |
 | `TEZCA_MAX_BLOB_MB` | `100` | Largest attachment (plaintext MiB). Uploads over this + 40 bytes of encryption overhead get 413. Shown to clients as `max_blob_bytes` in `/api/info`. |
-| `TEZCA_GUEST_QUOTA_MB` | `1024` | Storage cap per guest (a user who joined through a share invite and has no host account): the total size of attachments they upload to this server, in MiB. Uploads over it get 507. `0` = unlimited. |
+| `TEZCA_GUEST_QUOTA_MB` | `1024` | Storage cap per guest (a user who joined through a share invite and has no host account), in MiB: the attachments they upload plus the note edits and snapshots they write (until history pruning drops them). Uploads over it get 507, edits get `TOO_LARGE`. `0` = unlimited. |
 | `TEZCA_HISTORY_HOURS` | `24` | Version history: keep the newest snapshot per clock hour for this many hours. |
 | `TEZCA_HISTORY_DAYS` | `30` | Version history: keep the newest snapshot per UTC day for this many days, and the edit log for this long (point-in-time restore). The latest snapshot is always kept. |
 

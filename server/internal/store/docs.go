@@ -233,8 +233,10 @@ func checkEpoch(tx *sql.Tx, spaceID string, epoch uint32) error {
 }
 
 // AppendUpdate assigns seq = latest_seq+1, stores the update durably and returns the new doc row.
-// The caller must hold the doc's lock so the returned seq order matches broadcast order.
-func (s *Store) AppendUpdate(ctx context.Context, spaceID, docID string, u Update) (Doc, error) {
+// The caller must hold the doc's lock so the returned seq order matches broadcast order. With
+// quota > 0, an update that would take the author's storage (UserBytes) over quota is not stored
+// and ErrQuota is returned.
+func (s *Store) AppendUpdate(ctx context.Context, spaceID, docID string, u Update, quota int64) (Doc, error) {
 	var d Doc
 	err := s.tx(ctx, func(tx *sql.Tx) error {
 		if err := checkEpoch(tx, spaceID, u.Epoch); err != nil {
@@ -258,6 +260,9 @@ func (s *Store) AppendUpdate(ctx context.Context, spaceID, docID string, u Updat
 			spaceID, docID, d.LatestSeq, u.Epoch, u.Author, u.Payload, u.Sig, created); err != nil {
 			return err
 		}
+		if err := checkQuota(tx, u.Author, quota); err != nil {
+			return err
+		}
 		_, err = tx.Exec(`INSERT INTO docs(space_id, doc_id, latest_seq, snapshot_seq, updates_since_snapshot, bytes_since_snapshot)
 			VALUES(?, ?, ?, ?, ?, ?) ON CONFLICT(space_id, doc_id) DO UPDATE SET latest_seq = excluded.latest_seq,
 			updates_since_snapshot = excluded.updates_since_snapshot, bytes_since_snapshot = excluded.bytes_since_snapshot`,
@@ -273,9 +278,10 @@ func (s *Store) AppendUpdate(ctx context.Context, spaceID, docID string, u Updat
 // PutSnapshot stores a snapshot with created_at = now (unix ms), applies the History retention
 // policy as of now (snapshots and the update log), and recomputes the since-snapshot counters.
 // Updates covered by the snapshot are kept for the history window (point-in-time restore); only
-// the ones older than that are dropped. Invalid base_seq → ErrConflict. The caller must hold
-// the doc's lock.
-func (s *Store) PutSnapshot(ctx context.Context, spaceID, docID string, sn Snapshot, now int64) (Doc, error) {
+// the ones older than that are dropped. Invalid base_seq → ErrConflict. With quota > 0, a
+// snapshot that leaves the author's storage (UserBytes, after pruning) over quota is not stored
+// and ErrQuota is returned. The caller must hold the doc's lock.
+func (s *Store) PutSnapshot(ctx context.Context, spaceID, docID string, sn Snapshot, now, quota int64) (Doc, error) {
 	var d Doc
 	err := s.tx(ctx, func(tx *sql.Tx) error {
 		if err := checkEpoch(tx, spaceID, sn.Epoch); err != nil {
@@ -301,6 +307,9 @@ func (s *Store) PutSnapshot(ctx context.Context, spaceID, docID string, sn Snaps
 			return err
 		}
 		if err := s.pruneSnapshots(tx, spaceID, docID, now); err != nil {
+			return err
+		}
+		if err := checkQuota(tx, sn.Author, quota); err != nil {
 			return err
 		}
 		d.SnapshotSeq = sn.BaseSeq

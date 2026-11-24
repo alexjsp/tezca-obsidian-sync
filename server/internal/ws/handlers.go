@@ -39,6 +39,8 @@ func (c *conn) fail(rid uint32, space, doc string, err error) {
 		c.send(errFrame(rid, pb.ErrorCode_ERROR_CODE_CONFLICT, "conflict", space, doc))
 	case errors.Is(err, store.ErrNotFound):
 		c.send(errFrame(rid, pb.ErrorCode_ERROR_CODE_NOT_FOUND, "not found", space, doc))
+	case errors.Is(err, store.ErrQuota):
+		c.send(errFrame(rid, pb.ErrorCode_ERROR_CODE_TOO_LARGE, "guest storage quota exceeded", space, doc))
 	default:
 		c.h.log.Error("request failed", "err", err, "space", space, "doc", doc)
 		c.send(errFrame(rid, pb.ErrorCode_ERROR_CODE_INTERNAL, "internal error", space, doc))
@@ -273,6 +275,14 @@ func headsFrame(d store.Doc) []byte {
 	return b
 }
 
+// quota is the storage cap for this session's writes: GuestQuotaBytes for guests, else none.
+func (c *conn) quota() int64 {
+	if c.user.Role == store.HostGuest {
+		return c.h.cfg.GuestQuotaBytes
+	}
+	return 0
+}
+
 // checkWrite applies the role and epoch checks shared by PushUpdate and PutSnapshot.
 func (c *conn) checkWrite(ctx context.Context, space, doc string, epoch uint32) error {
 	if !store.ValidID(space) || !store.ValidID(doc) {
@@ -304,7 +314,7 @@ func (c *conn) pushUpdate(ctx context.Context, m *pb.PushUpdate) error {
 	var opErr error
 	c.h.withDoc(m.SpaceId, m.DocId, func(ds *docState) {
 		u := store.Update{Epoch: m.Epoch, Author: c.user.SignPk, Payload: m.Payload, Sig: m.Sig}
-		d, err := c.h.cfg.Store.AppendUpdate(ctx, m.SpaceId, m.DocId, u)
+		d, err := c.h.cfg.Store.AppendUpdate(ctx, m.SpaceId, m.DocId, u, c.quota())
 		if err != nil {
 			opErr = err
 			return
@@ -337,7 +347,7 @@ func (c *conn) putSnapshot(ctx context.Context, m *pb.PutSnapshot) error {
 	var opErr error
 	c.h.withDoc(m.SpaceId, m.DocId, func(ds *docState) {
 		sn := store.Snapshot{BaseSeq: m.BaseSeq, Epoch: m.Epoch, Author: c.user.SignPk, Payload: m.Payload, Sig: m.Sig}
-		d, err := c.h.cfg.Store.PutSnapshot(ctx, m.SpaceId, m.DocId, sn, c.h.cfg.Now().UnixMilli())
+		d, err := c.h.cfg.Store.PutSnapshot(ctx, m.SpaceId, m.DocId, sn, c.h.cfg.Now().UnixMilli(), c.quota())
 		if err != nil {
 			opErr = err
 			return

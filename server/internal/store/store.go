@@ -154,6 +154,11 @@ CREATE INDEX IF NOT EXISTS blobs_by_creator ON blobs(created_by);
 ALTER TABLE updates ADD COLUMN created_at INT NOT NULL DEFAULT 0;
 UPDATE updates SET created_at = CAST(strftime('%s','now') AS INTEGER) * 1000;
 `,
+	// v6: guest quotas also count the updates and snapshots a user authored.
+	`
+CREATE INDEX IF NOT EXISTS updates_by_author ON updates(author);
+CREATE INDEX IF NOT EXISTS snapshots_by_author ON snapshots(author);
+`,
 }
 
 func migrate(db *sql.DB) error {
@@ -442,12 +447,28 @@ func (s *Store) Redeem(ctx context.Context, token string, signPk, boxPk []byte, 
 
 // ───────────── pairings ─────────────
 
-// CreatePairing stores an opaque pairing ciphertext and returns its id.
-func (s *Store) CreatePairing(ctx context.Context, owner, ciphertext []byte, expiresAt int64) (string, error) {
+// MaxPairingsPerUser caps how many unexpired, untaken pairings one user may have at a time.
+const MaxPairingsPerUser = 5
+
+// CreatePairing stores an opaque pairing ciphertext and returns its id. An owner who already
+// has MaxPairingsPerUser pairings unexpired at now gets ErrQuota.
+func (s *Store) CreatePairing(ctx context.Context, owner, ciphertext []byte, now, expiresAt int64) (string, error) {
 	id := RandomID(16)
-	_, err := s.w.ExecContext(ctx, `INSERT INTO pairings(id, owner, ciphertext, expires_at) VALUES(?, ?, ?, ?)`,
-		id, owner, ciphertext, expiresAt)
-	return id, err
+	err := s.tx(ctx, func(tx *sql.Tx) error {
+		var n int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM pairings WHERE owner = ? AND expires_at > ?`, owner, now).Scan(&n); err != nil {
+			return err
+		}
+		if n >= MaxPairingsPerUser {
+			return ErrQuota
+		}
+		_, err := tx.Exec(`INSERT INTO pairings(id, owner, ciphertext, expires_at) VALUES(?, ?, ?, ?)`, id, owner, ciphertext, expiresAt)
+		return err
+	})
+	if err != nil {
+		return "", err
+	}
+	return id, nil
 }
 
 // TakePairing returns and deletes a pairing atomically. Expired or missing → ErrNotFound.

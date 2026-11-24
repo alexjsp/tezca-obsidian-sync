@@ -49,6 +49,9 @@ type Config struct {
 	WriteTimeout time.Duration // default 30s
 	QueueSize    int           // default 1024 frames
 	Now          func() time.Time
+	// GuestQuotaBytes caps what each guest stores on the host: blobs plus the updates and
+	// snapshots they author (store.UserBytes). 0 = unlimited.
+	GuestQuotaBytes int64
 }
 
 type docKey struct{ space, doc string }

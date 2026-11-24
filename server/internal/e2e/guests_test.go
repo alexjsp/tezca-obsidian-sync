@@ -360,7 +360,7 @@ func TestGuestQuota(t *testing.T) {
 	if code, out := put(g2, blob(), 100, false); code != 201 {
 		t.Fatalf("second guest: %d %v", code, out)
 	}
-	if used, err := e.st.UserBlobBytes(context.Background(), g.pk); err != nil || used != 100 {
+	if used, err := e.st.UserBytes(context.Background(), g.pk); err != nil || used != 100 {
 		t.Fatalf("guest usage: %d %v", used, err)
 	}
 }

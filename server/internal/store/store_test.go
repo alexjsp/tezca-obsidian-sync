@@ -104,7 +104,7 @@ func TestInvites(t *testing.T) {
 func TestPairings(t *testing.T) {
 	ctx := context.Background()
 	s := open(t)
-	id, err := s.CreatePairing(ctx, pk(1), []byte("ct"), 100)
+	id, err := s.CreatePairing(ctx, pk(1), []byte("ct"), 0, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,12 +115,80 @@ func TestPairings(t *testing.T) {
 	if _, err := s.TakePairing(ctx, id, 50); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("second take: %v", err)
 	}
-	id2, _ := s.CreatePairing(ctx, pk(1), []byte("ct"), 100)
+	id2, _ := s.CreatePairing(ctx, pk(1), []byte("ct"), 0, 100)
 	if _, err := s.TakePairing(ctx, id2, 100); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expired take: %v", err)
 	}
-	s.CreatePairing(ctx, pk(1), []byte("ct"), 100)
+	s.CreatePairing(ctx, pk(1), []byte("ct"), 0, 100)
 	if err := s.PruneExpired(ctx, 100); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPairingCap(t *testing.T) {
+	ctx := context.Background()
+	s := open(t)
+	var ids []string
+	for i := 0; i < MaxPairingsPerUser; i++ {
+		id, err := s.CreatePairing(ctx, pk(1), []byte("ct"), 10, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	if _, err := s.CreatePairing(ctx, pk(1), []byte("ct"), 10, 100); !errors.Is(err, ErrQuota) {
+		t.Fatalf("over cap: %v", err)
+	}
+	if _, err := s.CreatePairing(ctx, pk(2), []byte("ct"), 10, 100); err != nil {
+		t.Fatalf("another user: %v", err)
+	}
+	// Taking one frees a slot.
+	if _, err := s.TakePairing(ctx, ids[0], 20); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreatePairing(ctx, pk(1), []byte("ct"), 20, 100); err != nil {
+		t.Fatalf("after take: %v", err)
+	}
+	// Expired ones don't count.
+	if _, err := s.CreatePairing(ctx, pk(1), []byte("ct"), 100, 200); err != nil {
+		t.Fatalf("after expiry: %v", err)
+	}
+}
+
+func TestUserBytesQuota(t *testing.T) {
+	ctx := context.Background()
+	s := open(t)
+	sp := "space1"
+	if err := s.CreateSpace(ctx, sp, KindProfile, pk(1), []byte("w"), nil, 1); err != nil {
+		t.Fatal(err)
+	}
+	const quota = 100
+	if _, err := s.AppendUpdate(ctx, sp, "d", Update{Author: pk(1), Payload: make([]byte, 60), Sig: []byte("s")}, quota); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AppendUpdate(ctx, sp, "d", Update{Author: pk(1), Payload: make([]byte, 50), Sig: []byte("s")}, quota); !errors.Is(err, ErrQuota) {
+		t.Fatalf("update over quota: %v", err)
+	}
+	if d, _ := s.GetDoc(ctx, sp, "d"); d.LatestSeq != 1 {
+		t.Fatalf("rejected update was stored: %+v", d)
+	}
+	if _, err := s.AppendUpdate(ctx, sp, "d", Update{Author: pk(2), Payload: make([]byte, 50), Sig: []byte("s")}, quota); err != nil {
+		t.Fatalf("other author: %v", err)
+	}
+	if _, err := s.PutSnapshot(ctx, sp, "d", Snapshot{BaseSeq: 2, Author: pk(1), Payload: make([]byte, 41), Sig: []byte("s")}, 1, quota); !errors.Is(err, ErrQuota) {
+		t.Fatalf("snapshot over quota: %v", err)
+	}
+	if _, err := s.PutSnapshot(ctx, sp, "d", Snapshot{BaseSeq: 2, Author: pk(1), Payload: make([]byte, 40), Sig: []byte("s")}, 1, quota); err != nil {
+		t.Fatalf("snapshot at quota: %v", err)
+	}
+	if _, err := s.PutBlob(ctx, sp, "b", Blob{Size: 1, CreatedBy: pk(1), CreatedAt: 1}, quota); !errors.Is(err, ErrQuota) {
+		t.Fatalf("blob over quota: %v", err)
+	}
+	if n, err := s.UserBytes(ctx, pk(1)); err != nil || n != 100 {
+		t.Fatalf("UserBytes = %d, %v", n, err)
+	}
+	// No quota: always stored.
+	if _, err := s.AppendUpdate(ctx, sp, "d", Update{Author: pk(1), Payload: make([]byte, 50), Sig: []byte("s")}, 0); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -158,12 +226,12 @@ func TestSpacesAndDocs(t *testing.T) {
 		t.Fatalf("empty doc: %+v %v", d, err)
 	}
 	for i := 1; i <= 10; i++ {
-		d, err := s.AppendUpdate(ctx, sp, "index", Update{Epoch: 0, Author: pk(1), Payload: make([]byte, 10), Sig: []byte("s")})
+		d, err := s.AppendUpdate(ctx, sp, "index", Update{Epoch: 0, Author: pk(1), Payload: make([]byte, 10), Sig: []byte("s")}, 0)
 		if err != nil || d.LatestSeq != uint64(i) || d.UpdatesSinceSnapshot != uint32(i) || d.BytesSinceSnapshot != uint64(10*i) {
 			t.Fatalf("append %d: %+v %v", i, d, err)
 		}
 	}
-	if _, err := s.AppendUpdate(ctx, sp, "index", Update{Epoch: 1, Author: pk(1), Payload: []byte{1}, Sig: []byte("s")}); !errors.Is(err, ErrEpochStale) {
+	if _, err := s.AppendUpdate(ctx, sp, "index", Update{Epoch: 1, Author: pk(1), Payload: []byte{1}, Sig: []byte("s")}, 0); !errors.Is(err, ErrEpochStale) {
 		t.Fatalf("stale epoch: %v", err)
 	}
 	var batches [][]uint64
@@ -189,7 +257,7 @@ func TestSpacesAndDocs(t *testing.T) {
 
 	// Snapshots.
 	snap := func(base uint64) error {
-		_, err := s.PutSnapshot(ctx, sp, "index", Snapshot{BaseSeq: base, Author: pk(1), Payload: []byte("snap"), Sig: []byte("s")}, 1)
+		_, err := s.PutSnapshot(ctx, sp, "index", Snapshot{BaseSeq: base, Author: pk(1), Payload: []byte("snap"), Sig: []byte("s")}, 1, 0)
 		return err
 	}
 	for _, bad := range []uint64{0, 11} {
@@ -197,7 +265,7 @@ func TestSpacesAndDocs(t *testing.T) {
 			t.Fatalf("snapshot %d: %v", bad, err)
 		}
 	}
-	if _, err := s.PutSnapshot(ctx, sp, "other", Snapshot{BaseSeq: 1}, 1); !errors.Is(err, ErrConflict) {
+	if _, err := s.PutSnapshot(ctx, sp, "other", Snapshot{BaseSeq: 1}, 1, 0); !errors.Is(err, ErrConflict) {
 		t.Fatalf("snapshot of missing doc: %v", err)
 	}
 	if err := snap(4); err != nil {
@@ -247,10 +315,10 @@ func TestSpacesAndDocs(t *testing.T) {
 	}
 	// Past the history window, updates covered by the newest snapshot are dropped.
 	later := time.Now().Add(31 * 24 * time.Hour).UnixMilli()
-	if _, err := s.AppendUpdate(ctx, sp, "index", Update{Author: pk(1), Payload: []byte("u"), Sig: []byte("s")}); err != nil {
+	if _, err := s.AppendUpdate(ctx, sp, "index", Update{Author: pk(1), Payload: []byte("u"), Sig: []byte("s")}, 0); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.PutSnapshot(ctx, sp, "index", Snapshot{BaseSeq: 11, Author: pk(1), Payload: []byte("snap"), Sig: []byte("s")}, later); err != nil {
+	if _, err := s.PutSnapshot(ctx, sp, "index", Snapshot{BaseSeq: 11, Author: pk(1), Payload: []byte("snap"), Sig: []byte("s")}, later, 0); err != nil {
 		t.Fatal(err)
 	}
 	left := 0

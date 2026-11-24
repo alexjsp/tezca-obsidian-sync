@@ -78,7 +78,7 @@ func TestSnapshotHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := 0; i < 10; i++ {
-		if _, err := s.AppendUpdate(ctx, sp, "d", Update{Author: pk(1), Payload: []byte("u"), Sig: []byte("s")}); err != nil {
+		if _, err := s.AppendUpdate(ctx, sp, "d", Update{Author: pk(1), Payload: []byte("u"), Sig: []byte("s")}, 0); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -88,7 +88,7 @@ func TestSnapshotHistory(t *testing.T) {
 	t0 := ms("2026-11-01 01:00:00")
 	put := func(base uint64, at int64, payload string) {
 		t.Helper()
-		d, err := s.PutSnapshot(ctx, sp, "d", Snapshot{BaseSeq: base, Author: pk(1), Payload: []byte(payload), Sig: []byte("sig")}, at)
+		d, err := s.PutSnapshot(ctx, sp, "d", Snapshot{BaseSeq: base, Author: pk(1), Payload: []byte(payload), Sig: []byte("sig")}, at, 0)
 		if err != nil || d.SnapshotCreatedAt != at {
 			t.Fatalf("put %d: %+v %v", base, d, err)
 		}
@@ -169,10 +169,10 @@ func TestBlobRows(t *testing.T) {
 	if created, err := s.PutBlob(ctx, sp, "c", Blob{Size: 10, CreatedBy: pk(1)}, 20); err != nil || !created {
 		t.Fatalf("up to quota: %v %v", created, err)
 	}
-	if used, err := s.UserBlobBytes(ctx, pk(1)); err != nil || used != 20 {
+	if used, err := s.UserBytes(ctx, pk(1)); err != nil || used != 20 {
 		t.Fatalf("usage: %d %v", used, err)
 	}
-	if used, err := s.UserBlobBytes(ctx, pk(3)); err != nil || used != 0 {
+	if used, err := s.UserBytes(ctx, pk(3)); err != nil || used != 0 {
 		t.Fatalf("usage of nobody: %d %v", used, err)
 	}
 }
