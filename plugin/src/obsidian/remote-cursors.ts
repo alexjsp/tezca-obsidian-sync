@@ -86,6 +86,17 @@ export function remoteCursors(avatarFor: AvatarLookup) {
 			}
 
 			update(update: ViewUpdate) {
+				try {
+					this.redraw(update);
+				} catch (e) {
+					// Never let a bad cursor take the plugin down (CodeMirror would disable it, leaving
+					// stale cursors on screen): drop the remote cursors until the next update instead.
+					console.warn("[tezca] couldn't draw remote cursors", e);
+					this.decorations = RangeSet.of([]);
+				}
+			}
+
+			private redraw(update: ViewUpdate) {
 				const { ytext, awareness } = this.conf;
 				const ydoc = ytext.doc as Y.Doc;
 				const local = awareness.getLocalState();
@@ -124,11 +135,16 @@ export function remoteCursors(avatarFor: AvatarLookup) {
 					const mark = Decoration.mark({ attributes: { style: `background-color: ${light}` }, class: "tezca-remote-selection" });
 					const startLine = update.view.state.doc.lineAt(start);
 					const endLine = update.view.state.doc.lineAt(end);
+					// CodeMirror rejects empty marks (and a plugin that throws stops drawing, leaving stale
+					// cursors on screen): e.g. a triple-click selection ends at the start of the next line.
+					const markRange = (from: number, to: number) => {
+						if (to > from) decos.push(mark.range(from, to));
+					};
 					if (start !== end) {
-						if (startLine.number === endLine.number) decos.push(mark.range(start, end));
+						if (startLine.number === endLine.number) markRange(start, end);
 						else {
-							decos.push(mark.range(start, startLine.to));
-							decos.push(mark.range(endLine.from, end));
+							markRange(start, startLine.to);
+							markRange(endLine.from, end);
 							for (let i = startLine.number + 1; i < endLine.number; i++) {
 								const from = update.view.state.doc.line(i).from;
 								decos.push(Decoration.line({ attributes: { style: `background-color: ${light}` } }).range(from));
