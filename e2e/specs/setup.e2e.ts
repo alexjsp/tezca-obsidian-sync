@@ -16,7 +16,8 @@ describe("setup: recovery phrase, second vault, disconnect", function () {
 	before(async function () {
 		server = await TezcaServer.start();
 		[mac, restored, other] = await Promise.all([Device.launch("mac"), Device.launch("new-laptop"), Device.launch("other-vault", { mobile: true })]);
-		await claimHost(mac, server);
+		// Also checks "Copy recovery phrase" works from the Settings window, where setup happens.
+		await claimHost(mac, server, { checkCopy: true });
 		await mac.write("Notes/Important.md", "Don't lose me.\n");
 		await mac.waitSynced();
 	});

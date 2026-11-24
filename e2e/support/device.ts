@@ -474,8 +474,17 @@ export class Device {
 	}
 
 	/** Acknowledge the recovery phrase screen. */
-	async ackRecoveryPhrase() {
-		const m = await this.modal("Your recovery phrase");
+	async ackRecoveryPhrase(checkCopy = false) {
+		let m = await this.modal("Your recovery phrase");
+		if (checkCopy) {
+			const words: string[] = [];
+			for (const w of await m.$$(".tezca-phrase > div")) words.push((await w.getText()).replace(/^\d+\.\s*/, ""));
+			await this.click((await m.$("button.tezca-copy-phrase")) as unknown as WebdriverIO.Element);
+			await waitFor(async () => (await m.$("button.tezca-copy-phrase").getText()).startsWith("Copied"), { what: `${this.name}: copy confirmed` });
+			const clip = await this.exec(() => (window as unknown as { require(m: string): { clipboard: { readText(): string } } }).require("electron").clipboard.readText());
+			if (clip !== words.join(" ")) throw new Error(`${this.name}: clipboard has ${JSON.stringify(clip)}, not the phrase`);
+			m = await this.modal("Your recovery phrase"); // exec switched to the main window
+		}
 		await this.click((await m.$(".checkbox-container")) as unknown as WebdriverIO.Element);
 		await this.clickButton("Done", m);
 		await this.noModal("Your recovery phrase");

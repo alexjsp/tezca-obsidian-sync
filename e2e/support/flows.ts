@@ -10,9 +10,9 @@ export async function pasteSetupLink(d: Device, link: string) {
 }
 
 /** Claim a fresh host from `d` (becomes its admin, with a new synced vault). */
-export async function claimHost(d: Device, server: TezcaServer) {
+export async function claimHost(d: Device, server: TezcaServer, opts: { checkCopy?: boolean } = {}) {
 	await pasteSetupLink(d, server.claimLink);
-	await d.ackRecoveryPhrase();
+	await d.ackRecoveryPhrase(opts.checkCopy);
 	await waitConfigured(d);
 	await d.closeSettings();
 	await d.waitSynced();

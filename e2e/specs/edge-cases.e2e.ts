@@ -33,15 +33,19 @@ describe("edge cases", function () {
 		await d.page.enablePlugin("tezca-sync");
 	}
 
-	const statusText = (d: Device) => d.exec(() => document.querySelector(".tezca-status")?.textContent ?? null);
+	/** The status bar's full text (shown on hover; the visible text is empty when all's well). */
+	const statusText = (d: Device) => d.exec(() => document.querySelector(".tezca-status")?.getAttribute("aria-label") ?? null);
+	const visibleStatus = (d: Device) => d.exec(() => document.querySelector(".tezca-status")?.textContent ?? null);
 
 	it("shows sync state in the status bar, including offline", async function () {
 		await waitFor(async () => (await statusText(mac)) === "Tezca: synced", { what: "synced", detail: () => statusText(mac) });
+		assert.equal(await visibleStatus(mac), "", "just the dot when synced");
 		await server.kill();
 		await waitFor(async () => (await statusText(mac)) === "Tezca: offline" || (await statusText(mac)) === "Tezca: connecting…", {
 			what: "offline status",
 			detail: () => statusText(mac),
 		});
+		assert.match((await visibleStatus(mac)) ?? "", /offline|connecting/, "says what's wrong");
 		await server.restart();
 		await mac.command("tezca-sync:reconnect");
 		await phone.command("tezca-sync:reconnect");
