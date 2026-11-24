@@ -30,6 +30,7 @@ var (
 	ErrLastOwner  = errors.New("last owner")
 	ErrBadKeys    = errors.New("keys do not match")
 	ErrQuota      = errors.New("quota exceeded")
+	ErrLastAdmin  = errors.New("last admin")
 )
 
 // Host roles (match pb.HostRole).
@@ -354,6 +355,96 @@ func (s *Store) GetUser(ctx context.Context, signPk []byte) (User, error) {
 		return u, ErrNotFound
 	}
 	return u, err
+}
+
+// ListUsers returns every host user, oldest first. (created_at is unix ms for the user who
+// claimed the server and unix seconds for everyone else.)
+func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
+	rows, err := s.r.QueryContext(ctx, `SELECT sign_pk, box_pk, role, created_at FROM users
+		ORDER BY CASE WHEN created_at > 100000000000 THEN created_at / 1000 ELSE created_at END, sign_pk`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []User
+	for rows.Next() {
+		var u User
+		if err := rows.Scan(&u.SignPk, &u.BoxPk, &u.Role, &u.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
+// RemoveUser deletes the host user target, on behalf of the admin actor, with everything that
+// gives them access: their space memberships and wrapped keys, their pairings, and the
+// unredeemed host and share invites they created. It returns the spaces they were a member of.
+// The spaces themselves and what was written to them are kept; a share whose last owner is
+// removed keeps its other members. Errors: ErrForbidden (actor isn't an admin), ErrNotFound (no
+// such user), ErrLastAdmin (target is the only admin).
+func (s *Store) RemoveUser(ctx context.Context, actor, target []byte) (spaces []string, err error) {
+	err = s.tx(ctx, func(tx *sql.Tx) error {
+		var role int
+		err := tx.QueryRow(`SELECT role FROM users WHERE sign_pk = ?`, actor).Scan(&role)
+		if errors.Is(err, sql.ErrNoRows) || err == nil && role != HostAdmin {
+			return ErrForbidden
+		}
+		if err != nil {
+			return err
+		}
+		err = tx.QueryRow(`SELECT role FROM users WHERE sign_pk = ?`, target).Scan(&role)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if role == HostAdmin {
+			var n int
+			if err := tx.QueryRow(`SELECT COUNT(*) FROM users WHERE role = ?`, HostAdmin).Scan(&n); err != nil {
+				return err
+			}
+			if n <= 1 {
+				return ErrLastAdmin
+			}
+		}
+		rows, err := tx.Query(`SELECT space_id FROM members WHERE sign_pk = ? ORDER BY space_id`, target)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var sp string
+			if err := rows.Scan(&sp); err != nil {
+				rows.Close()
+				return err
+			}
+			spaces = append(spaces, sp)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		for _, q := range []string{
+			`DELETE FROM members WHERE sign_pk = ?1`,
+			`DELETE FROM space_keys WHERE sign_pk = ?1`,
+			`DELETE FROM pairings WHERE owner = ?1`,
+			`DELETE FROM invites WHERE created_by = ?1 AND redeemed_by IS NULL`,
+			`DELETE FROM share_invite_keys WHERE token IN
+				(SELECT token FROM share_invites WHERE created_by = ?1 AND redeemed_by IS NULL)`,
+			`UPDATE share_invites SET revoked = 1 WHERE created_by = ?1 AND redeemed_by IS NULL`,
+			`DELETE FROM users WHERE sign_pk = ?1`,
+		} {
+			if _, err := tx.Exec(q, target); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		spaces = nil
+	}
+	return spaces, err
 }
 
 // ───────────── invites ─────────────

@@ -250,6 +250,23 @@ func (h *Hub) SpaceChanged(space string, signPks [][]byte) {
 	}
 }
 
+// StatusUserRemoved is the close code for sessions of a user an admin removed.
+const StatusUserRemoved = websocket.StatusPolicyViolation
+
+// DisconnectUser closes every live session of signPk. Call it after the user's row is gone:
+// a handshake re-checks the user after registering, so none can survive this.
+func (h *Hub) DisconnectUser(signPk []byte) {
+	h.mu.Lock()
+	cs := make([]*conn, 0, len(h.users[string(signPk)]))
+	for c := range h.users[string(signPk)] {
+		cs = append(cs, c)
+	}
+	h.mu.Unlock()
+	for _, c := range cs {
+		c.kill(StatusUserRemoved, "user removed")
+	}
+}
+
 // EvictMember ends every live subscription signPk's sessions hold on space's doc-heads feed
 // and on its docs. Call it after the membership row is gone: subscribe re-checks membership
 // under the same locks, so no subscription can be registered after this returns.

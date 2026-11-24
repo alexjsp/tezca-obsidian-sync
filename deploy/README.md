@@ -109,4 +109,7 @@ end-to-end encrypted, but it sees the same metadata the server does.
   attachments in an existing S3-compatible bucket instead of `/data/blobs`.
 - **Upgrades:** `docker compose pull && docker compose up -d --build`. Migrations run on start.
 - **Shutdown:** `SIGTERM` closes all sessions (clients reconnect and resync) and exits cleanly.
+- **Removing a user:** an admin can list users with `GET /api/users` and remove one with
+  `DELETE /api/users/{sign_pk}` (see [`docs/protocol.md`](../docs/protocol.md#removing-a-user)).
+  This ends their sessions and removes them from every space.
 - **Environment:** see [`server/README.md`](../server/README.md#configuration).

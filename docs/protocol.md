@@ -87,6 +87,8 @@ the URL used in generated links. Otherwise the URL is taken from `X-Forwarded-Pr
 | `POST /api/invites` | HTTP sig, admin | `{role:"member", ttl_seconds?}` → `{token, expires_at, link}` |
 | `GET /api/invites` | HTTP sig, admin | `{invites:[{token_hint, role, expires_at, redeemed_by}]}` |
 | `POST /api/redeem` | body sig | `{token, sign_pk, box_pk, sig}` → `{server_id, role}`. Single-use. Re-redeeming with the same key is idempotent. |
+| `GET /api/users` | HTTP sig, admin | `{users:[{sign_pk, box_pk, role, created_at}]}`, oldest first. `role` is `"admin"`, `"member"` or `"guest"`; `created_at` is unix seconds. |
+| `DELETE /api/users/{sign_pk}` | HTTP sig, admin | `{}`. Removes a host user (see "Removing a user"). 404 unknown user, 409 if they're the last admin. |
 | `PUT /api/spaces/{space_id}/blobs/{blob_id}` | HTTP sig, OWNER/EDITOR | Raw ciphertext body (`application/octet-stream`) → `{size}`. 201 if stored, 200 if it already existed (body discarded). 413 if larger than `max_blob_bytes + 40`. |
 | `GET /api/spaces/{space_id}/blobs/{blob_id}` | HTTP sig, member | → raw ciphertext, or 404. |
 | `HEAD /api/spaces/{space_id}/blobs/{blob_id}` | HTTP sig, member | 200 (with `Content-Length`) or 404. |
@@ -112,6 +114,19 @@ deadline passes.
 JSON byte fields are `b64u`. HTTP sig header:
 `Authorization: Tezca pk=<b64u sign_pk>, ts=<unix seconds>, sig=<b64u>` with ±300 s skew allowed.
 `path_with_query` is the request URI as sent, e.g. `/api/invites`.
+
+#### Removing a user
+
+`DELETE /api/users/{sign_pk}` (`sign_pk` as b64u) lets an admin revoke a user's access to the host,
+for example someone who left or an identity on a lost device. In one transaction the server deletes
+the user, their memberships and wrapped keys in every space, their pairings, and the unredeemed
+host and share invites they created. It then closes the user's live WebSocket sessions (status
+1008, reason `user removed`) and sends `SpaceChanged` to the remaining members of each space they
+were in. The spaces and everything written to them stay. A share whose only owner was removed keeps
+its other members, but nobody can manage it any more. Owners should rotate the key of shares the
+user was in, since they still hold the old epochs' keys. The last admin can't be removed, by anyone
+including themselves. All of a user's devices share one identity, so this removes every device; the
+person can rejoin with a new invite and a new identity.
 
 Plugin deep links (handled by the plugin, not the server):
 - `obsidian://tezca?do=claim&host=<url>&code=<code>`

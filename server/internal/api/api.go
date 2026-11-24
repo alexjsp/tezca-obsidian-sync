@@ -74,6 +74,8 @@ type Notifier interface {
 	SpaceChanged(space string, signPks [][]byte)
 	// EvictMember ends signPk's live subscriptions to space's feed and docs.
 	EvictMember(space string, signPk []byte)
+	// DisconnectUser closes every live session of signPk.
+	DisconnectUser(signPk []byte)
 }
 
 // API is the HTTP handler.
@@ -121,6 +123,8 @@ func New(cfg Config) *API {
 	m.HandleFunc("POST /api/invites", a.createInvite)
 	m.HandleFunc("GET /api/invites", a.listInvites)
 	m.HandleFunc("POST /api/redeem", a.redeem)
+	m.HandleFunc("GET /api/users", a.listUsers)
+	m.HandleFunc("DELETE /api/users/{sign_pk}", a.removeUser)
 	m.HandleFunc("POST /api/pairings", a.createPairing)
 	m.HandleFunc("GET /api/pairings/{id}", a.takePairing)
 	if cfg.Blobs != nil {
@@ -580,6 +584,87 @@ func (a *API) listInvites(w http.ResponseWriter, r *http.Request) {
 			out = append(out, it)
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"invites": out})
+		return nil
+	}()
+	if err != nil {
+		a.fail(w, err)
+	}
+}
+
+// unixSeconds normalizes a stored user created_at (unix ms for the claiming admin, unix seconds
+// for everyone else) to seconds.
+func unixSeconds(t int64) int64 {
+	if t > 1e11 { // seconds that large are thousands of years away
+		return t / 1000
+	}
+	return t
+}
+
+func (a *API) listUsers(w http.ResponseWriter, r *http.Request) {
+	err := func() error {
+		u, _, err := a.authenticate(r)
+		if err != nil {
+			return err
+		}
+		if u.Role != store.HostAdmin {
+			return herr(http.StatusForbidden, "admin only")
+		}
+		users, err := a.cfg.Store.ListUsers(r.Context())
+		if err != nil {
+			return err
+		}
+		type item struct {
+			SignPk    B64    `json:"sign_pk"`
+			BoxPk     B64    `json:"box_pk"`
+			Role      string `json:"role"`
+			CreatedAt int64  `json:"created_at"`
+		}
+		out := make([]item, 0, len(users))
+		for _, x := range users {
+			out = append(out, item{SignPk: x.SignPk, BoxPk: x.BoxPk, Role: roleName(x.Role), CreatedAt: unixSeconds(x.CreatedAt)})
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"users": out})
+		return nil
+	}()
+	if err != nil {
+		a.fail(w, err)
+	}
+}
+
+// removeUser: DELETE /api/users/{sign_pk} (admin). Removes the user and their access, then ends
+// their live sessions and tells the members of their spaces.
+func (a *API) removeUser(w http.ResponseWriter, r *http.Request) {
+	err := func() error {
+		u, _, err := a.authenticate(r)
+		if err != nil {
+			return err
+		}
+		target, err := memberPath(r)
+		if err != nil {
+			return err
+		}
+		spaces, err := a.cfg.Store.RemoveUser(r.Context(), u.SignPk, target)
+		switch {
+		case errors.Is(err, store.ErrForbidden):
+			return herr(http.StatusForbidden, "admin only")
+		case errors.Is(err, store.ErrNotFound):
+			return herr(http.StatusNotFound, "user not found")
+		case errors.Is(err, store.ErrLastAdmin):
+			return herr(http.StatusConflict, "the server must keep at least one admin")
+		case err != nil:
+			return err
+		}
+		a.log.Info("user removed", "user", base64.RawURLEncoding.EncodeToString(target), "by", base64.RawURLEncoding.EncodeToString(u.SignPk))
+		if a.cfg.Notify != nil {
+			a.cfg.Notify.DisconnectUser(target)
+			for _, sp := range spaces {
+				a.cfg.Notify.EvictMember(sp, target)
+			}
+		}
+		for _, sp := range spaces {
+			a.notifyMembers(r, sp)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{})
 		return nil
 	}()
 	if err != nil {

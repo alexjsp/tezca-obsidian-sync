@@ -233,6 +233,11 @@ func (c *conn) handshake(ctx context.Context) bool {
 	c.user = user
 	c.deviceID = hello.DeviceId
 	c.h.registerUser(c) // before AuthOk, so a client that has seen AuthOk gets SpaceChanged
+	// Re-check after registering: if an admin removed the user meanwhile, DisconnectUser either
+	// saw this session or the user is already gone here.
+	if _, err := c.h.cfg.Store.GetUser(ctx, hello.SignPk); err != nil {
+		return unauth("unknown user")
+	}
 	c.ws.SetReadLimit(ReadLimit)
 	c.send(&pb.ServerFrame{Msg: &pb.ServerFrame_AuthOk{AuthOk: &pb.AuthOk{
 		SignPk: user.SignPk, BoxPk: user.BoxPk, Role: pb.HostRole(user.Role),
