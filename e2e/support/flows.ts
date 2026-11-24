@@ -69,3 +69,29 @@ export async function setDisplayName(d: Device, name: string) {
 	await row.$("input").setValue(name);
 	await d.closeSettings();
 }
+
+/** A tiny real community plugin (for plugin tests): sets window.__<id> when it loads. */
+export function dummyPlugin(id: string, name: string) {
+	const flag = `__${id.replace(/\W/g, "_")}`;
+	return {
+		manifest: { id, name, version: "1.0.0", minAppVersion: "1.0.0", description: "Test plugin", author: "e2e", isDesktopOnly: false },
+		mainJs: `const { Plugin } = require("obsidian");\nmodule.exports = class extends Plugin {\n\tonload() { window.${flag} = true; }\n\tonunload() { delete window.${flag}; }\n};\n`,
+		flag,
+	};
+}
+
+/** Install and enable a plugin from its files, the way Obsidian does after a download. */
+export async function installPluginFiles(d: Device, p: ReturnType<typeof dummyPlugin>) {
+	await d.exec(
+		async ({ app }, manifest, mainJs) => {
+			const dir = `${app.vault.configDir}/plugins/${manifest.id}`;
+			await app.vault.adapter.mkdir(dir);
+			await app.vault.adapter.write(`${dir}/manifest.json`, JSON.stringify(manifest, null, "\t"));
+			await app.vault.adapter.write(`${dir}/main.js`, mainJs);
+			await app.plugins.loadManifests();
+			await app.plugins.enablePluginAndSave(manifest.id);
+		},
+		p.manifest,
+		p.mainJs,
+	);
+}

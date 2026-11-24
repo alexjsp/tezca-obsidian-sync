@@ -340,9 +340,18 @@ unmounts the share on this user's devices; it does not delete the share's files 
 
 ### Member profiles (client-defined)
 
-A share's index doc has a `Y.Map` named `members`: `sign_pk b64u → Y.Map{name, color}`, written by
-each member for themselves. It names cursors and the member list. (Not a security boundary: any
-member can write any key. Signed membership is future work.)
+A share's index doc has a `Y.Map` named `members`: `sign_pk b64u → JSON string {name, color,
+avatar?}`, written by each member for themselves (viewers can't write, so they stay unnamed).
+`avatar` is a small JPEG data URL (64 px, ≤ 24 000 chars). It names cursors and the member list.
+Awareness `user` carries `pk` (the sign_pk, b64u) so cursors can look the profile up. A user's own
+root (or profile) space has the same map with just their own `{avatar}`, so their devices share it.
+(Not a security boundary: any member can write any key. Signed membership is future work.)
+
+### Recommended plugins (client-defined)
+
+A share's index doc has a `Y.Map` named `plugins`: `community plugin id → JSON string {name,
+author?}`, written by members who can edit. Clients offer to install them (from Obsidian's community
+plugin directory, through Obsidian's installer) when someone joins the share.
 
 ## Cross-host shares and guests (M4)
 

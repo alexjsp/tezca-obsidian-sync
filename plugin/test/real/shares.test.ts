@@ -98,6 +98,28 @@ describe("shared folders (real server)", () => {
 		await eventually(() => text(v, "Docs/x.md") === "owner edit", 10_000, "owner edit reaches viewer");
 	});
 
+	it("recommended plugins: set by members who can edit, seen by everyone who joins", async () => {
+		const alex = await claimAdmin(server, "Alex");
+		const vic = await inviteMember(server, alex, "Vic");
+		const a = await device(alex, "a", { "Docs/x.md": "x" });
+		const spaceId = await a.engine.shareFolder("Docs", "Docs");
+		await eventually(() => a.engine.shares.has(spaceId), 10_000, "mounted");
+		a.engine.setRecommendedPlugins(spaceId, [
+			{ id: "dataview", name: "Dataview", author: "Michael Brenan" },
+			{ id: "obsidian-tasks-plugin", name: "Tasks" },
+			{ id: "../../evil", name: "Not a plugin id" },
+		]);
+		await idle(a);
+		const v = await device(vic, "v");
+		await join(a, v, spaceId, "viewer", "Docs");
+		await eventually(() => v.engine.recommendedPlugins(spaceId).length === 2, 10_000, "list reaches the member");
+		expect(v.engine.recommendedPlugins(spaceId)).toEqual([
+			{ id: "dataview", name: "Dataview", author: "Michael Brenan" },
+			{ id: "obsidian-tasks-plugin", name: "Tasks", author: undefined },
+		]);
+		expect(() => v.engine.setRecommendedPlugins(spaceId, [])).toThrow(/can edit/);
+	});
+
 	it("a viewer made an editor publishes their name to the member list", async () => {
 		const alex = await claimAdmin(server, "Alex");
 		const vic = await inviteMember(server, alex, "Vic");

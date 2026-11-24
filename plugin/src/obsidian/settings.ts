@@ -93,7 +93,7 @@ export class TezcaSettingTab extends PluginSettingTab {
 						b
 							.setButtonText("Manage")
 							.setDisabled(!sh)
-							.onClick(() => new ShareModal(this.app, p.engine!, m.spaceId).open()),
+							.onClick(() => new ShareModal(this.app, p.engine!, m.spaceId, p.installer).open()),
 					);
 			}
 

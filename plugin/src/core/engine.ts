@@ -56,6 +56,13 @@ export interface MountedSpace {
 	mirror: DiskMirror;
 }
 
+/** A community plugin recommended by a shared folder (its id in Obsidian's plugin directory). */
+export interface RecommendedPlugin {
+	id: string;
+	name: string;
+	author?: string;
+}
+
 export interface ShareMember {
 	signPk: Uint8Array;
 	role: SpaceRole;
@@ -600,6 +607,34 @@ export class SyncEngine {
 			}
 			return { signPk: m.signPk, role: m.role, name: prof.name, color: prof.color, avatar: prof.avatar, isMe: k === me };
 		});
+	}
+
+	/** Community plugins a shared folder's members recommend to whoever joins it. */
+	recommendedPlugins(spaceId: string): RecommendedPlugin[] {
+		const map = this.shares.get(spaceId)?.space.index.ydoc.getMap<string>("plugins");
+		const out: RecommendedPlugin[] = [];
+		map?.forEach((v, id) => {
+			try {
+				const p = JSON.parse(v) as Partial<RecommendedPlugin>;
+				if (typeof p.name === "string") out.push({ id, name: p.name, author: typeof p.author === "string" ? p.author : undefined });
+			} catch {
+				/* ignore malformed */
+			}
+		});
+		return out.sort((a, b) => a.name.localeCompare(b.name));
+	}
+
+	/** Replace a shared folder's recommended plugins (members who can edit). */
+	setRecommendedPlugins(spaceId: string, plugins: RecommendedPlugin[]): void {
+		const space = this.shares.get(spaceId)?.space;
+		if (!space) throw new Error("That shared folder isn't mounted here");
+		if (!space.canWrite()) throw new Error("Only members who can edit can change the recommended plugins");
+		const map = space.index.ydoc.getMap<string>("plugins");
+		const want = new Map(plugins.filter((p) => /^[a-z0-9-_.]+$/i.test(p.id)).map((p) => [p.id, JSON.stringify({ name: p.name, author: p.author })]));
+		space.index.ydoc.transact(() => {
+			for (const id of [...map.keys()]) if (!want.has(id)) map.delete(id);
+			for (const [id, v] of want) if (map.get(id) !== v) map.set(id, v);
+		}, LOCAL_ORIGIN);
 	}
 
 	roleIn(spaceId: string): ShareRole | null {

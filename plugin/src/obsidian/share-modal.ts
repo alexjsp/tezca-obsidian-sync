@@ -5,6 +5,8 @@ import { b64u, fingerprint } from "../core/crypto";
 import type { ShareInviteInfo, ShareRole } from "../core/setup";
 import { SpaceRole } from "../proto/tezca/v1/sync_pb";
 import { LinkModal, confirm } from "./modals";
+import type { PluginInstaller } from "./plugin-installer";
+import { ChooseRecommendedModal, InstallRecommendedModal } from "./recommended-plugins";
 import { renderAvatar } from "./avatar";
 
 const ROLE: Record<number, ShareRole> = { [SpaceRole.OWNER]: "owner", [SpaceRole.EDITOR]: "editor", [SpaceRole.VIEWER]: "viewer" };
@@ -20,6 +22,7 @@ export class ShareModal extends Modal {
 		app: App,
 		private readonly engine: SyncEngine,
 		private readonly spaceId: string,
+		private readonly installer: PluginInstaller,
 	) {
 		super(app);
 	}
@@ -111,6 +114,36 @@ export class ShareModal extends Modal {
 			const list = contentEl.createDiv();
 			void this.renderInvites(list);
 		}
+
+		contentEl.createEl("h4", { text: "Recommended plugins" });
+		const recommended = this.engine.recommendedPlugins(this.spaceId);
+		const missing = recommended.filter((r) => this.installer.state(r.id) !== "enabled");
+		new Setting(contentEl)
+			.setName(recommended.length ? recommended.map((r) => r.name).join(", ") : "None yet")
+			.setDesc(
+				recommended.length
+					? missing.length
+						? `People who join are offered these. You're missing ${missing.length}.`
+						: "People who join are offered these. You have them all."
+					: "Community plugins this folder's notes need, offered to people when they join.",
+			)
+			.then((s) => {
+				if (missing.length)
+					s.addButton((b) => b.setButtonText("Install…").onClick(() => new InstallRecommendedModal(this.app, name, this.installer, recommended).open()));
+				if (this.engine.roleIn(this.spaceId) !== "viewer")
+					s.addButton((b) =>
+						b.setButtonText("Choose…").onClick(() =>
+							new ChooseRecommendedModal(this.app, name, this.installer, recommended, (list) => {
+								try {
+									this.engine.setRecommendedPlugins(this.spaceId, list);
+									void this.render();
+								} catch (e) {
+									new Notice(`Couldn't save: ${(e as Error).message}`);
+								}
+							}).open(),
+						),
+					);
+			});
 
 		contentEl.createEl("h4", { text: "Leave" });
 		new Setting(contentEl)

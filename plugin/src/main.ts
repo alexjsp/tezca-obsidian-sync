@@ -24,6 +24,8 @@ import { DeletedFilesModal, HistoryModal } from "./obsidian/history-modal";
 import { ShareModal } from "./obsidian/share-modal";
 import { EditorBindings } from "./obsidian/editor";
 import { renderAvatar } from "./obsidian/avatar";
+import { PluginInstaller } from "./obsidian/plugin-installer";
+import { InstallRecommendedModal } from "./obsidian/recommended-plugins";
 import { LinkModal, RecoveryPhraseModal, choose, confirm, form } from "./obsidian/modals";
 import { TezcaSettingTab } from "./obsidian/settings";
 import { ObsidianVault } from "./obsidian/vault-adapter";
@@ -70,6 +72,7 @@ export default class TezcaPlugin extends Plugin {
 	engine: SyncEngine | null = null;
 	identity: Identity | null = null;
 	editors!: EditorBindings;
+	installer!: PluginInstaller;
 	private statusEl: HTMLElement | null = null;
 	private presenceEl: HTMLElement | null = null;
 	private lastStatus: EngineStatus | null = null;
@@ -82,6 +85,7 @@ export default class TezcaPlugin extends Plugin {
 		await this.loadSettings();
 		log.level = this.settings.debug ? "debug" : "info";
 
+		this.installer = new PluginInstaller(this.app, this.manifest.id);
 		this.editors = new EditorBindings(
 			() => this.engine,
 			() => ({
@@ -170,7 +174,7 @@ export default class TezcaPlugin extends Plugin {
 				const file = this.app.workspace.getActiveFile();
 				const sh = file ? this.engine?.spaceFor(file.path) : null;
 				if (!sh || sh === this.engine?.root) return false;
-				if (!checking) new ShareModal(this.app, this.engine!, sh.spaceId).open();
+				if (!checking) new ShareModal(this.app, this.engine!, sh.spaceId, this.installer).open();
 				return true;
 			},
 		});
@@ -196,7 +200,7 @@ export default class TezcaPlugin extends Plugin {
 						item
 							.setTitle("Manage shared folder…")
 							.setIcon("users")
-							.onClick(() => new ShareModal(this.app, engine, mount.spaceId).open()),
+							.onClick(() => new ShareModal(this.app, engine, mount.spaceId, this.installer).open()),
 					);
 				} else if (!engine.isProfile && !engine.mounts?.containing(file.path) && !engine.mounts?.all().some((m) => m.path.startsWith(file.path + "/"))) {
 					menu.addItem((item) =>
@@ -427,7 +431,7 @@ export default class TezcaPlugin extends Plugin {
 			const spaceId = await engine.shareFolder(path, name);
 			new Notice(`"${name}" is now a shared folder`);
 			const open = () => {
-				if (engine.shares.has(spaceId)) new ShareModal(this.app, engine, spaceId).open();
+				if (engine.shares.has(spaceId)) new ShareModal(this.app, engine, spaceId, this.installer).open();
 				else window.setTimeout(open, 300);
 			};
 			open();
@@ -442,7 +446,9 @@ export default class TezcaPlugin extends Plugin {
 		const engine = this.engine;
 		if (!engine) throw new Error("Tezca isn't running. Check its settings, then open the invite link again.");
 		const path = await engine.joinShare(token, secret, (n) => this.askMountPath(n), host);
-		if (path) new Notice(`Joined. The shared folder is at "${path}".`);
+		if (!path) return;
+		new Notice(`Joined. The shared folder is at "${path}".`);
+		void this.offerRecommendedPlugins(engine, path);
 	}
 
 	/**
@@ -479,7 +485,22 @@ export default class TezcaPlugin extends Plugin {
 		const engine = this.engine;
 		if (!engine) return;
 		const path = await engine.joinShare(token, secret, (n) => this.askMountPath(n), host);
-		if (path) new Notice(`Joined. The shared folder is at "${path}".`);
+		if (!path) return;
+		new Notice(`Joined. The shared folder is at "${path}".`);
+		void this.offerRecommendedPlugins(engine, path);
+	}
+
+	/** After joining: offer the shared folder's recommended plugins this device doesn't have. */
+	private async offerRecommendedPlugins(engine: SyncEngine, path: string) {
+		const spaceId = engine.mounts?.all().find((m) => m.path === path)?.spaceId;
+		if (!spaceId) return;
+		// Wait for the share to mount and its index to arrive (that's where the list is).
+		for (let i = 0; i < 60 && !engine.shares.get(spaceId)?.mirror.isReady; i++) await sleep(500);
+		const sh = engine.shares.get(spaceId);
+		if (!sh || this.engine !== engine) return;
+		const list = engine.recommendedPlugins(spaceId);
+		if (!list.some((p) => this.installer.state(p.id) !== "enabled")) return;
+		new InstallRecommendedModal(this.app, sh.space.meta?.name ?? path, this.installer, list).open();
 	}
 
 	private async askMountPath(shareName: string): Promise<string | null> {

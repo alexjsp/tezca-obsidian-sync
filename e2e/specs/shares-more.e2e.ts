@@ -2,10 +2,12 @@
 // share, moving the shared folder, moving a file out of it, and removing it from one vault.
 import assert from "node:assert/strict";
 import { Device } from "../support/device";
-import { claimHost, inviteToHost, openDeepLink, pairDevice, setDisplayName } from "../support/flows";
+import { claimHost, dummyPlugin, installPluginFiles, inviteToHost, openDeepLink, pairDevice, setDisplayName } from "../support/flows";
 import { TezcaServer } from "../support/server";
 import { listFiles, waitConverged } from "../support/vault";
 import { sleep, waitFor } from "../support/wait";
+
+const gardenPlugin = dummyPlugin("garden-helper", "Garden helper");
 
 describe("shares: more", function () {
 	let server: TezcaServer;
@@ -29,6 +31,7 @@ describe("shares: more", function () {
 		await alice.choose('Share "Garden"?', "Share folder");
 		await alice.modal("Shared folder: Garden");
 		await alice.closeModals();
+		await installPluginFiles(alice, gardenPlugin);
 	});
 
 	after(async function () {
@@ -66,9 +69,43 @@ describe("shares: more", function () {
 		assert.equal(await bob.exec(({ plugins }) => plugins.tezcaSync.engine.mounts.all().length), 0);
 	});
 
-	it("a view-only invite makes Bob a viewer from the start", async function () {
+	it("Alice recommends one of her plugins for the shared folder", async function () {
+		const m = await manage(alice);
+		const row = await alice.settingRow("None yet", m);
+		await alice.click((await row.$("button=Choose…")) as unknown as WebdriverIO.Element);
+		const choose = await alice.modal('Recommend plugins for "Garden"');
+		await alice.setToggle(gardenPlugin.manifest.name, true, choose);
+		await alice.clickButton("Save", choose);
+		await alice.noModal("Recommend plugins");
+		await alice.find(".setting-item-name", { within: ".modal", text: gardenPlugin.manifest.name });
+		await alice.closeModals();
+	});
+
+	it("a view-only invite makes Bob a viewer from the start (and offers the recommended plugins)", async function () {
+		// Bob's device can't download from GitHub in a test: stand in for the directory lookup
+		// and Obsidian's download, and install the files the way Obsidian would.
+		await bob.exec(
+			({ app, plugins }, manifest, mainJs) => {
+				const inst = plugins.tezcaSync.installer;
+				inst.lookup = async () => "someone/garden-helper";
+				inst.remoteManifest = async () => manifest;
+				app.plugins.installPlugin = async (_repo: string, _version: string, m: { id: string }) => {
+					const dir = `${app.vault.configDir}/plugins/${m.id}`;
+					await app.vault.adapter.mkdir(dir);
+					await app.vault.adapter.write(`${dir}/manifest.json`, JSON.stringify(manifest));
+					await app.vault.adapter.write(`${dir}/main.js`, mainJs);
+					return true;
+				};
+			},
+			gardenPlugin.manifest,
+			gardenPlugin.mainJs,
+		);
 		await openDeepLink(bob, await createInvite("View only"));
 		await bob.submitForm('Join "Garden"', "Garden", "Join");
+		const offer = await bob.modal('Plugins recommended for "Garden"', 40_000);
+		await bob.clickButton("Install and enable", offer);
+		await bob.noModal("Plugins recommended");
+		await waitFor(() => bob.exec((_, flag) => !!(window as unknown as Record<string, unknown>)[flag], gardenPlugin.flag), { what: "the plugin running on Bob's device" });
 		await bob.waitForFile("Garden/Seeds.md", "- Tomatoes\n");
 		await waitFor(async () => (await role(bob)) === "viewer", { what: "Bob to be a viewer" });
 		await bob.open("Garden/Seeds.md");
