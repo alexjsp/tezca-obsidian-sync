@@ -317,8 +317,8 @@ The server for M3–M5 isn't deployed and no plugin release has been made since 
 ## E2E suite in real Obsidian (2026-11-24)
 
 `e2e/` drives real Obsidian 1.15 (wdio-obsidian-service, one instance per device, phones in mobile
-emulation) through setup, sync, shares, guests, cross-host, history, Canvas and settings sync. 27 tests
-plus 1 skipped known issue. Bugs it found, all fixed (with unit/real-server tests where the logic allows):
+emulation) through setup, sync, shares, guests, cross-host, history, Canvas and settings sync (see
+`e2e/README.md`), plus 1 skipped known issue. Bugs it found, all fixed (with unit/real-server tests where the logic allows):
 - A file deleted on disk just before sync started (another app, or Obsidian's file list lagging) made the
   read throw, and the whole engine failed to start.
 - A folder renamed on one device left the empty old folder on the others; after a restart that folder was
@@ -330,6 +330,18 @@ plus 1 skipped known issue. Bugs it found, all fixed (with unit/real-server test
   already open until it was reopened.
 - Settings sync never picked up changes made while Obsidian was running: the engine's and the mirrors'
   config scans shared one "seen" table, and the engine's scan (which ignores config) consumed the changes.
+
+Then, extending it to every remaining feature (plugin sync, setup paths, edge cases, more sharing), these
+were found and fixed:
+- The safety brake told the user to run "Force full reconcile", which didn't exist, and left the devices out
+  of step. Added it, plus "Restore files missing from this device" for the other answer.
+- Someone opening a note saw others' cursors only after up to ~15s (awareness renewal); a new client in a
+  note now gets an immediate reply.
+- A viewer's name never appeared in the member list (profiles live in the shared folder, which viewers
+  can't write), and a promoted viewer's didn't either until they renamed themselves. Profiles are rewritten
+  when access changes; unnamed viewers are labelled as such rather than "hasn't opened the share yet".
+- A guest whose storage quota was full had uploads retried forever without being told. Now a notice.
+Known limitation kept: view-only members are listed by key, not name.
 
 Known issue: **Canvas views and remote changes.** Two people typing in the *same* card at the same time loses
 one side's typing about half the time (different cards are fine). An open Canvas view keeps its changes for

@@ -20,10 +20,13 @@ Obsidian, vaults and settings are never touched: every instance gets a fresh cop
 | Spec | Instances | Covers |
 | --- | --- | --- |
 | `core` | mac, phone (mobile emulation) | setup through the settings UI (claim, pair), live typing both ways, simultaneous typing, opening a note made elsewhere (frozen-sidebar regression), fast note switching (overwrite regression), file/folder create/rename/move/delete, attachments rendering, offline edits and renames, same-line conflicts, server restart, app restart |
+| `edge-cases` | mac, phone | status bar states, named remote cursors, one note in split panes, case-only renames, extension changes, hidden folders and trash, the size limit, offline edits racing a remote rename or delete, the safety brake and both ways out of it |
+| `setup` | mac, new-laptop, other-vault | restoring from the recovery phrase, a second synced vault for the same person, disconnecting |
 | `shares` | alice, alice-laptop, bob (mobile) | share from the folder menu, join by invite, live edits and presence avatars, viewer role (read-only editor, outside changes put back), role changes while a note is open, leave, rejoin, remove a member |
-| `guests` | alice, carol (mobile, no setup), dave (own host) | joining as a guest, joining across hosts |
+| `shares-more` | alice, alice-laptop, bob | revoked and view-only invites, promoting to owner, Recently deleted in a share, moving the shared folder, moving a file out of it, deleting it on one person's devices |
+| `guests` | alice, carol (mobile, no setup), dave (own host) | joining as a guest, guest storage quota, joining across hosts |
 | `history` | mac, phone | note version restore (with diff), attachment version restore (with preview), Recently deleted |
-| `canvas-config` | mac, laptop, phone | Canvas cards edited in the Canvas UI on two devices, new + moved cards, settings sync (core, snippets, hotkeys), opt-in per device, Tezca's own settings never syncing |
+| `canvas-config` | mac, laptop, phone | Canvas cards edited in the Canvas UI on two devices, new and moved cards, connection labels; settings sync (core settings, a core plugin's settings, snippets, hotkeys), opt-in per device, community plugins (install, settings, disable), Tezca's own settings never syncing |
 
 ## When something fails
 
