@@ -1,8 +1,6 @@
-<p align="center"><img src="assets/icon.png" alt="Tezca icon: an obsidian mirror in a gold frame" width="128"></p>
+<p align="center"><img src="assets/banner.svg" alt="Tezca: live, end-to-end encrypted sync for Obsidian, on your own server." width="100%"></p>
 
-# Tezca
-
-Self-hosted, live, end-to-end encrypted sync for Obsidian, with shared folders you can edit together in real time.
+Tezca keeps your Obsidian vault in sync across your devices as you type, and lets you share folders that people edit together in real time. It runs on your own server, which only ever sees encrypted data.
 
 - **Live:** changes appear on your other devices as you type, with cursors showing where everyone is.
 - **End-to-end encrypted:** your server only ever stores encrypted data. It never sees your notes, file names or cursors.
